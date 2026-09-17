@@ -31,9 +31,21 @@ public class AuditService {
     public void record(String action, String entityType, String entityId, String transactionRef,
                        String propertyRef, Map<String, ?> before, Map<String, ?> after,
                        String outcome, String detail) {
+        recordAs(null, action, entityType, entityId, transactionRef, propertyRef, before, after, outcome, detail);
+    }
+
+    /**
+     * Audits an action that happens before a session exists, such as the two login
+     * steps: the state code then comes from the account being acted on.
+     */
+    public void recordAs(String stateCode, String action, String entityType, String entityId,
+                         String transactionRef, String propertyRef, Map<String, ?> before, Map<String, ?> after,
+                         String outcome, String detail) {
         CurrentUser user = CurrentUser.orNull();
+        String effectiveStateCode = stateCode != null ? stateCode
+                : (user != null ? user.stateCode() : RequestContext.stateCode());
         var params = new MapSqlParameterSource()
-                .addValue("stateCode", user != null ? user.stateCode() : RequestContext.stateCode())
+                .addValue("stateCode", effectiveStateCode)
                 .addValue("actorUserId", user != null ? user.id() : null)
                 .addValue("actorUsername", user != null ? user.username() : "SYSTEM")
                 .addValue("actorRole", user != null ? String.join(",", user.roles()) : "SYSTEM")

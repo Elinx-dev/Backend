@@ -170,18 +170,32 @@ public class TokenService {
         }
 
         if (parentTokenId != null) {
-            jdbc.update("""
-                    UPDATE chain.token SET status = 'SUPERSEDED', superseded_at = now() WHERE id = :id
-                    """, new MapSqlParameterSource("id", parentTokenId));
-            jdbc.update("UPDATE core.property SET status = 'SUPERSEDED' WHERE id = :propertyId",
-                    new MapSqlParameterSource("propertyId", parentPropertyId));
+            String parentPropertyRef = jdbc.queryForObject(
+                    "SELECT property_ref FROM core.property WHERE id = :id",
+                    new MapSqlParameterSource("id", parentPropertyId), String.class);
             byte[] prevState = previousStateHash(parentTokenId);
             int version = ((Number) parentRows.get(0).get("state_version")).intValue() + 1;
+            // The superseded parcel no longer carries ownership: its owners now sit on the child parcels.
+            byte[] emptyOwnerHash = ownerSetHash(List.of());
             byte[] state = stateHash((String) parentRows.get(0).get("token_ref"), version,
-                    Hashes.sha256(String.valueOf(parentPropertyId)), prevState == null ? new byte[32] : prevState,
-                    prevState, null);
+                    Hashes.sha256(parentPropertyRef), emptyOwnerHash, prevState, null);
+            jdbc.update("""
+                    UPDATE chain.token SET status = 'SUPERSEDED', superseded_at = now(), state_version = :version,
+                           owner_set_hash = :ownerHash, prev_state_hash = :prevState
+                     WHERE id = :id
+                    """, new MapSqlParameterSource()
+                    .addValue("id", parentTokenId)
+                    .addValue("version", version)
+                    .addValue("ownerHash", emptyOwnerHash)
+                    .addValue("prevState", prevState));
+            jdbc.update("UPDATE core.property SET status = 'SUPERSEDED' WHERE id = :propertyId",
+                    new MapSqlParameterSource("propertyId", parentPropertyId));
+            jdbc.update("""
+                    UPDATE core.property_owner SET effective_to = current_date
+                     WHERE property_id = :propertyId AND effective_to IS NULL
+                    """, new MapSqlParameterSource("propertyId", parentPropertyId));
             recordHistory(parentTokenId, version, "SUPERSEDE", transactionId,
-                    prevState == null ? new byte[32] : prevState, List.of(), null, prevState, state);
+                    emptyOwnerHash, List.of(), null, prevState, state);
         }
         return minted;
     }

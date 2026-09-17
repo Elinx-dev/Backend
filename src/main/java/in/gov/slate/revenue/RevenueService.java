@@ -72,7 +72,7 @@ public class RevenueService {
                   JOIN core.transaction t ON t.id = m.transaction_id
                   JOIN core.property p ON p.id = m.property_id
                  WHERE m.state_code = :stateCode
-                   AND (:status IS NULL OR m.status = :status)
+                   AND (CAST(:status AS text) IS NULL OR m.status = :status)
                  ORDER BY m.created_at
                  LIMIT :limit
                 """, new MapSqlParameterSource()

@@ -30,8 +30,8 @@ public class UserRepository {
 
     public Optional<UserRow> findByUsername(String username) {
         var rows = jdbc.queryForList("""
-                SELECT id, username, full_name, email, mobile, designation, department, state_code,
-                       password_hash, mfa_required, status, failed_login_count
+                SELECT id, username::text AS username, full_name, email::text AS email, mobile, designation,
+                       department, state_code, password_hash, mfa_required, status, failed_login_count
                   FROM sec.user WHERE username = :username
                 """, new MapSqlParameterSource("username", username));
         if (rows.isEmpty()) {

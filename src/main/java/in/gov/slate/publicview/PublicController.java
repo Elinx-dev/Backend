@@ -36,10 +36,10 @@ public class PublicController {
                                             @RequestParam(defaultValue = "25") int limit) {
         return jdbc.queryForList("""
                 SELECT * FROM rpt.public_property_view
-                 WHERE (:surveyNo IS NULL OR survey_no = :surveyNo)
-                   AND (:village IS NULL OR upper(village_code) = upper(:village))
-                   AND (:ulpin IS NULL OR ulpin = :ulpin)
-                   AND (:tokenRef IS NULL OR token_ref = :tokenRef)
+                 WHERE (CAST(:surveyNo AS text) IS NULL OR survey_no = :surveyNo)
+                   AND (CAST(:village AS text) IS NULL OR upper(village_code) = upper(:village))
+                   AND (CAST(:ulpin AS text) IS NULL OR ulpin = :ulpin)
+                   AND (CAST(:tokenRef AS text) IS NULL OR token_ref = :tokenRef)
                  ORDER BY property_ref
                  LIMIT :limit
                 """, new MapSqlParameterSource()

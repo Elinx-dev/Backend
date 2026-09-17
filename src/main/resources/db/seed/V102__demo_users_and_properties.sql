@@ -144,3 +144,12 @@ FROM core.property p JOIN (VALUES
   ('TN-CHN-00000008','PATTA-PER-1187','[{"name":"Nithya Balaji","relationType":null,"relatedPersonName":null}]'),
   ('KA-BLR-00000001','RTC-BEG-7781','[{"name":"Shivanna Gowda","relationType":null,"relatedPersonName":null}]')
 ) AS r(property_ref, rec_ref, owners) ON r.property_ref = p.property_ref;
+
+-- The demo properties above are inserted with explicit references, so the shared
+-- PROPERTY_REF counter is advanced past them; otherwise the first generated child
+-- parcel would collide with a seeded reference.
+UPDATE cfg.numbering_series ns
+   SET current_value = GREATEST(ns.current_value, seeded.max_seq)
+  FROM (SELECT state_code, MAX(split_part(property_ref, '-', 3)::BIGINT) AS max_seq
+          FROM core.property GROUP BY state_code) AS seeded
+ WHERE ns.series_code = 'PROPERTY_REF' AND ns.state_code = seeded.state_code;

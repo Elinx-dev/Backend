@@ -40,7 +40,7 @@ public class VerificationService {
         user.requirePermission("VERIFY_RUN");
         var tokenRows = jdbc.queryForList("""
                 SELECT t.id, t.token_ref, t.property_id, t.state_version, t.status,
-                       encode(t.property_ref_hash,'hex') AS property_ref_hash, p.property_ref
+                       '0x' || encode(t.property_ref_hash,'hex') AS property_ref_hash, p.property_ref
                   FROM chain.token t JOIN core.property p ON p.id = t.property_id
                  WHERE t.token_ref = :tokenRef
                 """, new MapSqlParameterSource("tokenRef", tokenRef));
@@ -52,8 +52,8 @@ public class VerificationService {
 
         var history = jdbc.queryForList("""
                 SELECT state_version, operation, owner_set_json,
-                       encode(owner_set_hash,'hex') AS owner_set_hash,
-                       encode(state_hash,'hex') AS state_hash, onchain_tx_hash
+                       '0x' || encode(owner_set_hash,'hex') AS owner_set_hash,
+                       '0x' || encode(state_hash,'hex') AS state_hash, onchain_tx_hash
                   FROM chain.token_state_history WHERE token_id = :id ORDER BY state_version
                 """, new MapSqlParameterSource("id", tokenId));
 

@@ -212,12 +212,12 @@ public class PropertyService {
                   FROM core.property p
                   LEFT JOIN chain.token t ON t.id = p.token_id
                  WHERE p.state_code = :stateCode
-                   AND (:query IS NULL OR p.property_ref ILIKE '%'||:query||'%'
+                   AND (CAST(:query AS text) IS NULL OR p.property_ref ILIKE '%'||:query||'%'
                         OR coalesce(p.ulpin,'') ILIKE '%'||:query||'%'
                         OR p.survey_no ILIKE '%'||:query||'%'
                         OR coalesce(p.door_no,'') ILIKE '%'||:query||'%')
-                   AND (:villageCode IS NULL OR p.village_code = :villageCode)
-                   AND (:surveyNo IS NULL OR p.survey_no = :surveyNo)
+                   AND (CAST(:villageCode AS text) IS NULL OR p.village_code = :villageCode)
+                   AND (CAST(:surveyNo AS text) IS NULL OR p.survey_no = :surveyNo)
                  ORDER BY p.property_ref
                  LIMIT :limit
                 """, new MapSqlParameterSource()

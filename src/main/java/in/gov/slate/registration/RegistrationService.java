@@ -90,9 +90,11 @@ public class RegistrationService {
                 .addValue("reference", txnRef), keyHolder, new String[]{"id"});
         long registrationId = keyHolder.getKey().longValue();
 
-        String newStatus = workflow.apply(ctx, "REGISTER", null, user);
+        // registered_at is frozen by core.guard_registered_transaction once the row
+        // reaches REGISTERED, so it is stamped before the transition is applied.
         jdbc.update("UPDATE core.transaction SET registered_at = now() WHERE id = :id",
                 new MapSqlParameterSource("id", ctx.id()));
+        String newStatus = workflow.apply(ctx, "REGISTER", null, user);
 
         long propertyId = ((Number) ctx.property().get("id")).longValue();
         applyRegisteredOwnership(propertyId, ctx.id(), resultingOwners, today);

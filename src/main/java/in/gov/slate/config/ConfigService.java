@@ -174,7 +174,7 @@ public class ConfigService {
                 SELECT rule_code, scope, expression, severity, message
                   FROM cfg.validation_rule
                  WHERE (deed_type_code = :deedTypeCode OR deed_type_code = '*')
-                   AND (:scope IS NULL OR scope = :scope)
+                   AND (CAST(:scope AS text) IS NULL OR scope = :scope)
                    AND active
                  ORDER BY scope, rule_code
                 """, new MapSqlParameterSource()

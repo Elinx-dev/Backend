@@ -197,9 +197,9 @@ public class EcRuleEngine implements RuleEngine {
                 SELECT count(*) FROM rules.survey_lineage
                  WHERE state_code = :stateCode AND revenue_village = :village
                    AND from_survey_no = :fromSurvey
-                   AND (from_subdivision IS NOT DISTINCT FROM :fromSub OR :fromSub IS NULL)
+                   AND (from_subdivision IS NOT DISTINCT FROM :fromSub OR CAST(:fromSub AS text) IS NULL)
                    AND to_survey_no = :toSurvey
-                   AND (to_subdivision IS NOT DISTINCT FROM :toSub OR :toSub IS NULL)
+                   AND (to_subdivision IS NOT DISTINCT FROM :toSub OR CAST(:toSub AS text) IS NULL)
                    AND verified_at IS NOT NULL
                 """, new MapSqlParameterSource()
                 .addValue("stateCode", ctx.property().get("state_code"))

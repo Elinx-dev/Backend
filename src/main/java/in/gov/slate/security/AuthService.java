@@ -59,8 +59,8 @@ public class AuthService {
         }
         if (!encoder.matches(password, user.passwordHash())) {
             users.recordLoginFailure(user.id());
-            audit.record("LOGIN", "USER", String.valueOf(user.id()), null, null, null, null, "FAILURE",
-                    "Password mismatch");
+            audit.recordAs(user.stateCode(), "LOGIN", "USER", String.valueOf(user.id()), null, null, null,
+                    Map.of("username", user.username()), "FAILURE", "Password mismatch");
             throw new ApiException(org.springframework.http.HttpStatus.UNAUTHORIZED,
                     "INVALID_CREDENTIALS", "Invalid username or password");
         }
@@ -70,8 +70,8 @@ public class AuthService {
         }
 
         UUID challengeId = users.createOtpChallenge(user.id(), encoder.encode(demoOtp), otpValiditySeconds);
-        audit.record("LOGIN_OTP_REQUESTED", "USER", String.valueOf(user.id()), null, null, null,
-                Map.of("challengeId", challengeId.toString()), "SUCCESS", null);
+        audit.recordAs(user.stateCode(), "LOGIN_OTP_REQUESTED", "USER", String.valueOf(user.id()), null, null, null,
+                Map.of("challengeId", challengeId.toString(), "username", user.username()), "SUCCESS", null);
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("mfaRequired", true);
@@ -107,8 +107,9 @@ public class AuthService {
         }
         if (!encoder.matches(otp, (String) challenge.get("otp_hash"))) {
             users.incrementChallengeAttempt(challengePk);
-            audit.record("LOGIN_OTP_VERIFY", "USER", challenge.get("user_id").toString(), null, null, null, null,
-                    "FAILURE", "OTP mismatch");
+            var attempted = users.findById(((Number) challenge.get("user_id")).longValue());
+            audit.recordAs(attempted.map(UserRepository.UserRow::stateCode).orElse(null), "LOGIN_OTP_VERIFY", "USER",
+                    challenge.get("user_id").toString(), null, null, null, null, "FAILURE", "OTP mismatch");
             throw new ApiException(org.springframework.http.HttpStatus.UNAUTHORIZED, "INVALID_OTP", "Incorrect OTP");
         }
         users.consumeChallenge(challengePk);
@@ -121,7 +122,7 @@ public class AuthService {
         var issued = jwt.issue(user.id(), user.username(), user.stateCode());
         users.openSession(user.id(), issued.jti(), issued.expiresAt().atOffset(ZoneOffset.UTC), ip, userAgent);
         users.recordLoginSuccess(user.id());
-        audit.record("LOGIN", "USER", String.valueOf(user.id()), null, null, null,
+        audit.recordAs(user.stateCode(), "LOGIN", "USER", String.valueOf(user.id()), null, null, null,
                 Map.of("username", user.username()), "SUCCESS", null);
 
         Map<String, Object> out = new LinkedHashMap<>();
