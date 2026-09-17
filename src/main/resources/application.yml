@@ -1,0 +1,69 @@
+server:
+  port: ${SLATE_API_PORT:8080}
+  error:
+    include-message: always
+
+spring:
+  application:
+    name: slate-api
+  datasource:
+    url: ${SLATE_DB_URL:jdbc:postgresql://localhost:5432/slate}
+    username: ${SLATE_DB_USER:slate}
+    password: ${SLATE_DB_PASSWORD:slate}
+    hikari:
+      maximum-pool-size: 15
+  flyway:
+    enabled: true
+    locations: classpath:db/migration,classpath:db/seed
+    schemas: public
+    baseline-on-migrate: true
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+
+slate:
+  jwt:
+    secret: ${SLATE_JWT_SECRET:local-demo-only-secret-key-please-override-in-any-real-environment}
+    access-token-minutes: ${SLATE_JWT_MINUTES:15}
+  otp:
+    # Officer login OTP and Aadhaar party-consent OTP are two different things.
+    # In the local demo both are served by deterministic mock connectors.
+    officer-demo-otp: ${SLATE_OFFICER_OTP:123456}
+    aadhaar-demo-otp: ${SLATE_AADHAAR_OTP:654321}
+    validity-seconds: 300
+  aadhaar:
+    # Raw Aadhaar is never persisted. Parties are stored as a salted SHA-256 hash
+    # plus the last four digits; the salt itself lives outside the database.
+    salt: ${SLATE_AADHAAR_SALT:local-demo-aadhaar-salt}
+    salt-ref: ${SLATE_AADHAAR_SALT_REF:local-demo-v1}
+  survey:
+    tolerance-pct: ${SLATE_SURVEY_TOLERANCE_PCT:1.0}
+  connectors:
+    mode: ${SLATE_CONNECTORS_MODE:MOCK}
+    ec-base-url: ${SLATE_EC_BASE_URL:http://localhost:8080/mock/ec}
+    revenue-base-url: ${SLATE_REVENUE_BASE_URL:http://localhost:8080/mock/revenue}
+    aadhaar-base-url: ${SLATE_AADHAAR_BASE_URL:http://localhost:8080/mock/aadhaar}
+  rules:
+    blocking: ${SLATE_RULES_BLOCKING:false}
+  chain:
+    enabled: ${SLATE_CHAIN_ENABLED:true}
+    rpc-primary: ${BESU_RPC_PRIMARY:http://localhost:8545}
+    rpc-secondary: ${BESU_RPC_SECONDARY:http://localhost:8546}
+    chain-id: ${CHAIN_ID:2026}
+    addresses-file: ${CHAIN_ADDRESSES_FILE:./chain/addresses.json}
+    # Demo-only submitter key. Production submits through Vault Transit / PKCS#11 HSM
+    # and never holds key material in configuration. See docs/SLATE_Architecture.md.
+    submitter-private-key: ${CHAIN_SUBMITTER_KEY:}
+  storage:
+    # The demo stores documents on the local filesystem behind the same interface
+    # that MinIO/S3 implements in a deployed environment.
+    root: ${SLATE_STORAGE_ROOT:./storage}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  level:
+    in.gov.slate: INFO

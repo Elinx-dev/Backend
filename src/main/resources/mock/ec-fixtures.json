@@ -1,0 +1,164 @@
+{
+  "_comment": "Deterministic EC fixtures for the local mock Registration/EC API. Key = VILLAGE|SURVEY_NO|SUBDIVISION_NO. Documented in docs/SLATE_Mock_External_APIs.md",
+
+  "PERUNGUDI|112|2A": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000101",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+
+  "THORAIPAKKAM|45|3": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000102",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": [
+      {
+        "entryNo": "1",
+        "entryDate": "2019-03-12",
+        "nature": "Deposit of Title Deeds / Simple Mortgage",
+        "documentNo": "1188/2019",
+        "previousDocumentReference": null,
+        "executants": ["Suseela Devi"],
+        "claimants": ["Kanchi Co-operative Bank"],
+        "amount": 1800000,
+        "lender": "Kanchi Co-operative Bank",
+        "schedule": {
+          "village": "THORAIPAKKAM", "surveyNo": "45", "subdivisionNo": "3",
+          "extent": 4800, "extentUnit": "SQ_FT", "doorNo": "9", "plotNo": "12",
+          "boundaries": "N: 45/2, S: 45/4, E: Canal, W: Road"
+        },
+        "remarks": "Mortgage created in favour of the bank"
+      },
+      {
+        "entryNo": "2",
+        "entryDate": "2023-08-04",
+        "nature": "Receipt / Discharge",
+        "documentNo": "4471/2023",
+        "previousDocumentReference": "1188/2019",
+        "executants": ["Kanchi Co-operative Bank"],
+        "claimants": ["Suseela Devi"],
+        "amount": 1800000,
+        "lender": "Kanchi Co-operative Bank",
+        "schedule": {
+          "village": "THORAIPAKKAM", "surveyNo": "45", "subdivisionNo": "3",
+          "extent": 4800, "extentUnit": "SQ_FT", "doorNo": "9", "plotNo": "12",
+          "boundaries": "N: 45/2, S: 45/4, E: Canal, W: Road"
+        },
+        "remarks": "Discharge of mortgage document 1188/2019"
+      }
+    ]
+  },
+
+  "SHOLINGANALLUR|78|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000103",
+    "issuedBy": "SRO Sholinganallur",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "2009-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "PARTIAL",
+    "coverageNote": "Records prior to 2009 are not digitised for this village",
+    "entries": []
+  },
+
+  "PERUNGUDI|23|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000104",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": [
+      {
+        "entryNo": "1",
+        "entryDate": "2021-11-19",
+        "nature": "Order of Attachment - District Munsif Court",
+        "documentNo": "OS-441/2021",
+        "previousDocumentReference": null,
+        "executants": ["District Munsif Court, Chengalpattu"],
+        "claimants": ["Thangaraj Pillai"],
+        "amount": null,
+        "lender": null,
+        "schedule": {
+          "village": "PERUNGUDI", "surveyNo": "23", "subdivisionNo": "1",
+          "extent": 3200, "extentUnit": "SQ_FT", "doorNo": "3", "plotNo": null,
+          "boundaries": "N: 23/2, S: Road, E: 24, W: 22"
+        },
+        "remarks": "Interim order in a partition suit"
+      }
+    ]
+  },
+
+  "KELAMBAKKAM|9|2B": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/KAN/2026/000105",
+    "issuedBy": "SRO Kelambakkam",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+
+  "PERUNGUDI|200|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000106",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+
+  "SHOLINGANALLUR|90|4": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000107",
+    "issuedBy": "SRO Sholinganallur",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": [
+      {
+        "entryNo": "1",
+        "entryDate": "2022-06-30",
+        "nature": "Simple Mortgage",
+        "documentNo": "2210/2022",
+        "previousDocumentReference": null,
+        "executants": ["Bhaskar Rao"],
+        "claimants": ["Sholinganallur Urban Bank"],
+        "amount": 4500000,
+        "lender": "Sholinganallur Urban Bank",
+        "schedule": {
+          "village": "SHOLINGANALLUR", "surveyNo": "90", "subdivisionNo": "4",
+          "extent": 12000, "extentUnit": "SQ_FT", "doorNo": "41", "plotNo": null,
+          "boundaries": "N: 90/3, S: 90/5, E: Road, W: 89"
+        },
+        "remarks": "No discharge on record"
+      }
+    ]
+  },
+
+  "BEGUR|54|7": {
+    "responseStatus": "UNAVAILABLE",
+    "certificateNo": null,
+    "issuedBy": null,
+    "issuedOn": null,
+    "periodFrom": null,
+    "periodTo": null,
+    "coverageStatus": "NONE",
+    "coverageNote": "Source registry did not respond",
+    "entries": []
+  }
+}

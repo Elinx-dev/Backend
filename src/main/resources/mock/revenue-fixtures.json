@@ -1,0 +1,91 @@
+{
+  "_comment": "Deterministic Revenue ownership fixtures. Key = VILLAGE|SURVEY_NO|SUBDIVISION_NO. Lookup is by survey identity; recordNumber is display-only. Documented in docs/SLATE_Mock_External_APIs.md",
+
+  "PERUNGUDI|112|2A": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1187",
+    "village": "PERUNGUDI", "surveyNo": "112", "subdivisionNo": "2A",
+    "landType": "NATHAM", "classification": "HOUSE_SITE",
+    "extent": 2400, "extentUnit": "SQ_FT",
+    "owners": [{ "name": "Raman Krishnan", "relationType": null, "relatedPersonName": null, "sharePct": null }],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1187"
+  },
+
+  "THORAIPAKKAM|45|3": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-THO-2290",
+    "village": "THORAIPAKKAM", "surveyNo": "45", "subdivisionNo": "3",
+    "landType": "NATHAM", "classification": "HOUSE_SITE",
+    "extent": 4800, "extentUnit": "SQ_FT",
+    "owners": [
+      { "name": "Suseela Devi", "relationType": null, "relatedPersonName": null, "sharePct": null },
+      { "name": "Gopal Devi", "relationType": "husband of", "relatedPersonName": "Suseela Devi", "sharePct": null }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/THO/2290"
+  },
+
+  "SHOLINGANALLUR|78|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-SHO-3311",
+    "village": "SHOLINGANALLUR", "surveyNo": "78", "subdivisionNo": "1",
+    "landType": "NATHAM", "classification": "HOUSE_SITE",
+    "extent": 10000, "extentUnit": "SQ_FT",
+    "owners": [{ "name": "Meenakshi Sundaram", "relationType": null, "relatedPersonName": null, "sharePct": null }],
+    "sourceReference": "TN-REVENUE-API/PATTA/SHO/3311"
+  },
+
+  "PERUNGUDI|23|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1450",
+    "village": "PERUNGUDI", "surveyNo": "23", "subdivisionNo": "1",
+    "landType": "NATHAM", "classification": "HOUSE_SITE",
+    "extent": 3200, "extentUnit": "SQ_FT",
+    "owners": [{ "name": "Thangaraj Pillai", "relationType": null, "relatedPersonName": null, "sharePct": null }],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1450"
+  },
+
+  "KELAMBAKKAM|9|2B": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-KEL-0912",
+    "village": "KELAMBAKKAM", "surveyNo": "9", "subdivisionNo": "2B",
+    "landType": "RURAL", "classification": "DRY",
+    "extent": 6000, "extentUnit": "SQ_FT",
+    "owners": [{ "name": "Raman K.", "relationType": null, "relatedPersonName": null, "sharePct": null }],
+    "sourceReference": "TN-REVENUE-API/PATTA/KEL/0912"
+  },
+
+  "PERUNGUDI|200|1": {
+    "responseStatus": "NOT_FOUND",
+    "recordNumber": null,
+    "village": "PERUNGUDI", "surveyNo": "200", "subdivisionNo": "1",
+    "landType": null, "classification": null,
+    "extent": null, "extentUnit": null,
+    "owners": [],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/NOT-FOUND"
+  },
+
+  "SHOLINGANALLUR|90|4": {
+    "responseStatus": "MULTIPLE",
+    "recordNumber": "PATTA-SHO-4400",
+    "village": "SHOLINGANALLUR", "surveyNo": "90", "subdivisionNo": "4",
+    "landType": "NATHAM", "classification": "HOUSE_SITE",
+    "extent": 12000, "extentUnit": "SQ_FT",
+    "owners": [
+      { "name": "Bhaskar Rao", "relationType": null, "relatedPersonName": null, "sharePct": null },
+      { "name": "Chitra Rao", "relationType": "wife of", "relatedPersonName": "Bhaskar Rao", "sharePct": null },
+      { "name": "Deepak Rao", "relationType": "son of", "relatedPersonName": "Bhaskar Rao", "sharePct": null }
+    ],
+    "multipleRecordRefs": ["PATTA-SHO-4400", "PATTA-SHO-4401"],
+    "sourceReference": "TN-REVENUE-API/PATTA/SHO/4400"
+  },
+
+  "BEGUR|54|7": {
+    "responseStatus": "UNAVAILABLE",
+    "recordNumber": null,
+    "village": "BEGUR", "surveyNo": "54", "subdivisionNo": "7",
+    "landType": null, "classification": null,
+    "extent": null, "extentUnit": null,
+    "owners": [],
+    "sourceReference": "KA-REVENUE-API/RTC/UNAVAILABLE"
+  }
+}
