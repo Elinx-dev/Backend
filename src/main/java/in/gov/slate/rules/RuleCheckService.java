@@ -86,12 +86,21 @@ public class RuleCheckService {
         CurrentUser user = CurrentUser.require();
         long txnId = repository.idOf(txnRef, user.stateCode());
         return jdbc.queryForList("""
-                SELECT q.engine, q.mode, q.assessment_date, q.connector_mode, q.requested_at,
-                       r.overall_outcome, r.reason_code, r.result_payload, r.advisory, r.checked_at
-                  FROM rules.rule_check_request q
-                  JOIN rules.rule_check_result r ON r.request_id = q.id
-                 WHERE q.transaction_id = :txnId
-                 ORDER BY r.checked_at DESC
+                SELECT engine, mode, assessment_date, connector_mode, requested_at,
+                       overall_outcome, reason_code, result_payload, advisory, checked_at
+                  FROM (
+                    SELECT q.engine, q.mode, q.assessment_date, q.connector_mode, q.requested_at,
+                           r.overall_outcome, r.reason_code, r.result_payload, r.advisory, r.checked_at,
+                           row_number() OVER (
+                               PARTITION BY q.engine
+                               ORDER BY r.checked_at DESC, q.requested_at DESC, r.id DESC
+                           ) AS result_rank
+                      FROM rules.rule_check_request q
+                      JOIN rules.rule_check_result r ON r.request_id = q.id
+                     WHERE q.transaction_id = :txnId
+                  ) latest
+                 WHERE result_rank = 1
+                 ORDER BY engine
                 """, new MapSqlParameterSource("txnId", txnId));
     }
 

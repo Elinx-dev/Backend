@@ -243,14 +243,14 @@ public class TransactionService {
         user.requirePermission("TXN_EDIT");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
         requireEditable(ctx);
-        jdbc.update("DELETE FROM core.witness WHERE transaction_id = :id",
+        jdbc.update("UPDATE core.witness SET is_active = 'N' WHERE transaction_id = :id AND is_active = 'Y'",
                 new MapSqlParameterSource("id", ctx.id()));
         int seq = 0;
         for (WitnessInput w : witnesses) {
             seq++;
             jdbc.update("""
-                    INSERT INTO core.witness (transaction_id, seq, name, address, id_proof_type, id_proof_ref)
-                    VALUES (:txnId, :seq, :name, :address, :type, :ref)
+                    INSERT INTO core.witness (transaction_id, seq, name, address, id_proof_type, id_proof_ref, is_active)
+                    VALUES (:txnId, :seq, :name, :address, :type, :ref, 'Y')
                     """, new MapSqlParameterSource()
                     .addValue("txnId", ctx.id())
                     .addValue("seq", seq)

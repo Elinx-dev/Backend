@@ -45,8 +45,12 @@ public class TransactionRepository {
                   FROM core.transaction_party WHERE transaction_id = :txnId ORDER BY side, seq
                 """, txnParam);
 
-        List<Map<String, Object>> witnesses = jdbc.queryForList(
-                "SELECT * FROM core.witness WHERE transaction_id = :txnId ORDER BY seq", txnParam);
+        List<Map<String, Object>> witnesses = jdbc.queryForList("""
+                SELECT id, transaction_id, seq, name, address, id_proof_type, id_proof_ref
+                  FROM core.witness
+                 WHERE transaction_id = :txnId AND is_active = 'Y'
+                 ORDER BY seq
+                """, txnParam);
 
         List<Map<String, Object>> consents = jdbc.queryForList("""
                 SELECT id, party_id, otp_request_reference, status, requested_at, verified_at, attempt_count
@@ -54,11 +58,19 @@ public class TransactionRepository {
                 """, txnParam);
 
         List<Map<String, Object>> ruleResults = jdbc.queryForList("""
-                SELECT r.engine, r.overall_outcome, r.reason_code, r.result_payload, r.advisory, r.checked_at
-                  FROM rules.rule_check_result r
-                  JOIN rules.rule_check_request q ON q.id = r.request_id
-                 WHERE q.transaction_id = :txnId
-                 ORDER BY r.checked_at DESC
+                                                                SELECT engine, overall_outcome, reason_code, result_payload, advisory, checked_at
+                                                                        FROM (
+                                                                                SELECT r.engine, r.overall_outcome, r.reason_code, r.result_payload, r.advisory, r.checked_at,
+                                                                                                         row_number() OVER (
+                                                                                                                         PARTITION BY r.engine
+                                                                                                                         ORDER BY r.checked_at DESC, q.requested_at DESC, r.id DESC
+                                                                                                         ) AS result_rank
+                                                                                        FROM rules.rule_check_result r
+                                                                                        JOIN rules.rule_check_request q ON q.id = r.request_id
+                                                                                 WHERE q.transaction_id = :txnId
+                                                                        ) latest
+                                                                 WHERE result_rank = 1
+                                                                 ORDER BY engine
                 """, txnParam);
 
         var fees = jdbc.queryForList("""
