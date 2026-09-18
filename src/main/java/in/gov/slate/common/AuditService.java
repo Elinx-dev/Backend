@@ -35,8 +35,8 @@ public class AuditService {
     }
 
     /**
-     * Audits an action that happens before a session exists, such as the two login
-     * steps: the state code then comes from the account being acted on.
+     * Audits an action that happens before a session exists, such as login: the
+     * state code then comes from the account being acted on.
      */
     public void recordAs(String stateCode, String action, String entityType, String entityId,
                          String transactionRef, String propertyRef, Map<String, ?> before, Map<String, ?> after,

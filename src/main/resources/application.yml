@@ -1,5 +1,5 @@
 server:
-  port: ${SLATE_API_PORT:8080}
+  port: ${SLATE_API_PORT:8081}
   error:
     include-message: always
 

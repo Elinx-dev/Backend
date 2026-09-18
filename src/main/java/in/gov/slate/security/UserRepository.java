@@ -25,13 +25,13 @@ public class UserRepository {
 
     public record UserRow(long id, String username, String fullName, String email, String mobile,
                           String designation, String department, String stateCode, String passwordHash,
-                          boolean mfaRequired, String status, int failedLoginCount) {
+                          String status, int failedLoginCount) {
     }
 
     public Optional<UserRow> findByUsername(String username) {
         var rows = jdbc.queryForList("""
                 SELECT id, username::text AS username, full_name, email::text AS email, mobile, designation,
-                       department, state_code, password_hash, mfa_required, status, failed_login_count
+                       department, state_code, password_hash, status, failed_login_count
                   FROM sec.user WHERE username = :username
                 """, new MapSqlParameterSource("username", username));
         if (rows.isEmpty()) {
@@ -48,7 +48,6 @@ public class UserRepository {
                 (String) r.get("department"),
                 (String) r.get("state_code"),
                 (String) r.get("password_hash"),
-                (Boolean) r.get("mfa_required"),
                 (String) r.get("status"),
                 ((Number) r.get("failed_login_count")).intValue()));
     }
@@ -102,37 +101,6 @@ public class UserRepository {
     public void recordLoginSuccess(long userId) {
         jdbc.update("UPDATE sec.user SET failed_login_count = 0, last_login_at = now() WHERE id = :id",
                 new MapSqlParameterSource("id", userId));
-    }
-
-    public UUID createOtpChallenge(long userId, String otpHash, int validitySeconds) {
-        UUID challengeId = UUID.randomUUID();
-        jdbc.update("""
-                INSERT INTO sec.login_otp (user_id, otp_hash, challenge_id, expires_at)
-                VALUES (:userId, :otpHash, :challengeId, now() + make_interval(secs => :validity))
-                """, new MapSqlParameterSource()
-                .addValue("userId", userId)
-                .addValue("otpHash", otpHash)
-                .addValue("challengeId", challengeId)
-                .addValue("validity", validitySeconds));
-        return challengeId;
-    }
-
-    public Optional<Map<String, Object>> findOpenChallenge(UUID challengeId) {
-        var rows = jdbc.queryForList("""
-                SELECT id, user_id, otp_hash, expires_at, consumed_at, attempt_count
-                  FROM sec.login_otp WHERE challenge_id = :challengeId
-                """, new MapSqlParameterSource("challengeId", challengeId));
-        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
-    }
-
-    public void consumeChallenge(long id) {
-        jdbc.update("UPDATE sec.login_otp SET consumed_at = now() WHERE id = :id",
-                new MapSqlParameterSource("id", id));
-    }
-
-    public void incrementChallengeAttempt(long id) {
-        jdbc.update("UPDATE sec.login_otp SET attempt_count = attempt_count + 1 WHERE id = :id",
-                new MapSqlParameterSource("id", id));
     }
 
     public void openSession(long userId, UUID jti, OffsetDateTime expiresAt, String ip, String userAgent) {

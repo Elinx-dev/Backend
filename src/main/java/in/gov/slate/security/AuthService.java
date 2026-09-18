@@ -1,13 +1,11 @@
 package in.gov.slate.security;
 
-import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,8 +16,8 @@ import in.gov.slate.common.CurrentUser;
 import in.gov.slate.common.Hashes;
 
 /**
- * Two-step officer login: password, then OTP. Both steps are audited, and the
- * issued token is bound to a server-side session row so it can be revoked.
+ * Password-based login. The issued token is bound to a server-side session row
+ * so it can be revoked.
  */
 @Service
 public class AuthService {
@@ -28,24 +26,12 @@ public class AuthService {
     private final PasswordEncoder encoder;
     private final JwtService jwt;
     private final AuditService audit;
-    private final String demoOtp;
-    private final int otpValiditySeconds;
 
-    public AuthService(UserRepository users, PasswordEncoder encoder, JwtService jwt, AuditService audit,
-                       @Value("${slate.otp.officer-demo-otp}") String demoOtp,
-                       @Value("${slate.otp.validity-seconds}") int otpValiditySeconds) {
+    public AuthService(UserRepository users, PasswordEncoder encoder, JwtService jwt, AuditService audit) {
         this.users = users;
         this.encoder = encoder;
         this.jwt = jwt;
         this.audit = audit;
-        this.demoOtp = demoOtp;
-        this.otpValiditySeconds = otpValiditySeconds;
-    }
-
-    public record LoginRequest(String username, String password) {
-    }
-
-    public record VerifyOtpRequest(String challengeId, String otp) {
     }
 
     @Transactional
@@ -65,56 +51,6 @@ public class AuthService {
                     "INVALID_CREDENTIALS", "Invalid username or password");
         }
 
-        if (!user.mfaRequired()) {
-            return issueToken(user, ip, userAgent);
-        }
-
-        UUID challengeId = users.createOtpChallenge(user.id(), encoder.encode(demoOtp), otpValiditySeconds);
-        audit.recordAs(user.stateCode(), "LOGIN_OTP_REQUESTED", "USER", String.valueOf(user.id()), null, null, null,
-                Map.of("challengeId", challengeId.toString(), "username", user.username()), "SUCCESS", null);
-
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("mfaRequired", true);
-        out.put("challengeId", challengeId.toString());
-        out.put("otpValiditySeconds", otpValiditySeconds);
-        out.put("deliveredTo", maskMobile(user.mobile()));
-        // Local/demo builds surface the OTP so the runbook does not need an SMS gateway.
-        out.put("demoOtp", demoOtp);
-        return out;
-    }
-
-    @Transactional
-    public Map<String, Object> verifyOtp(String challengeIdRaw, String otp, String ip, String userAgent) {
-        UUID challengeId;
-        try {
-            challengeId = UUID.fromString(challengeIdRaw);
-        } catch (IllegalArgumentException e) {
-            throw ApiException.badRequest("challengeId is not a valid identifier");
-        }
-        var challenge = users.findOpenChallenge(challengeId)
-                .orElseThrow(() -> ApiException.notFound("Login challenge"));
-        if (challenge.get("consumed_at") != null) {
-            throw ApiException.conflict("This login challenge has already been used");
-        }
-        long challengePk = ((Number) challenge.get("id")).longValue();
-        if (((Number) challenge.get("attempt_count")).intValue() >= 5) {
-            throw ApiException.forbidden("Too many OTP attempts for this challenge");
-        }
-        OffsetDateTime expiresAt = ((java.sql.Timestamp) challenge.get("expires_at")).toInstant()
-                .atOffset(ZoneOffset.UTC);
-        if (expiresAt.isBefore(OffsetDateTime.now(ZoneOffset.UTC))) {
-            throw ApiException.badRequest("OTP has expired; start the login again");
-        }
-        if (!encoder.matches(otp, (String) challenge.get("otp_hash"))) {
-            users.incrementChallengeAttempt(challengePk);
-            var attempted = users.findById(((Number) challenge.get("user_id")).longValue());
-            audit.recordAs(attempted.map(UserRepository.UserRow::stateCode).orElse(null), "LOGIN_OTP_VERIFY", "USER",
-                    challenge.get("user_id").toString(), null, null, null, null, "FAILURE", "OTP mismatch");
-            throw new ApiException(org.springframework.http.HttpStatus.UNAUTHORIZED, "INVALID_OTP", "Incorrect OTP");
-        }
-        users.consumeChallenge(challengePk);
-        var user = users.findById(((Number) challenge.get("user_id")).longValue())
-                .orElseThrow(() -> ApiException.notFound("User"));
         return issueToken(user, ip, userAgent);
     }
 

@@ -52,7 +52,7 @@ public class TransactionController {
         return transactions.queue(status, stage, sroCode, Math.min(limit, 500));
     }
 
-    @GetMapping("/{txnRef}")
+    @GetMapping({"/{txnRef}", "/ref/{txnRef}"})
     public Map<String, Object> detail(@PathVariable String txnRef) {
         return transactions.detail(txnRef);
     }

@@ -30,18 +30,9 @@ public class AuthController {
     public record LoginBody(@NotBlank String username, @NotBlank String password) {
     }
 
-    public record OtpBody(@NotBlank String challengeId, @NotBlank String otp) {
-    }
-
     @PostMapping("/login")
     public Map<String, Object> login(@Valid @RequestBody LoginBody body, HttpServletRequest request) {
         return auth.login(body.username(), body.password(), request.getRemoteAddr(),
-                request.getHeader("User-Agent"));
-    }
-
-    @PostMapping("/verify-otp")
-    public Map<String, Object> verifyOtp(@Valid @RequestBody OtpBody body, HttpServletRequest request) {
-        return auth.verifyOtp(body.challengeId(), body.otp(), request.getRemoteAddr(),
                 request.getHeader("User-Agent"));
     }
 
