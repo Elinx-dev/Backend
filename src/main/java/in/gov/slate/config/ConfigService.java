@@ -118,6 +118,76 @@ public class ConfigService {
         return out;
     }
 
+          public Map<String, Object> adminSnapshot(String stateCode) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("state", state(stateCode));
+        out.put("modules", jdbc.queryForList("""
+          SELECT id, module, enabled, mode, owner_department, sla_days, notes,
+                 effective_from, effective_to
+            FROM cfg.state_module_config
+           WHERE state_code = :stateCode AND effective_from <= current_date
+             AND (effective_to IS NULL OR effective_to >= current_date)
+           ORDER BY module
+          """, new MapSqlParameterSource("stateCode", stateCode)));
+        out.put("featureFlags", jdbc.queryForList("""
+          SELECT id, flag_code, enabled, description
+            FROM cfg.feature_flag
+           WHERE state_code IN (:stateCode, '*') ORDER BY flag_code
+          """, new MapSqlParameterSource("stateCode", stateCode)));
+        out.put("workflows", jdbc.queryForList("""
+          SELECT id, deed_type_code, workflow_code, version, status,
+                 effective_from, effective_to, published_at
+            FROM cfg.workflow_definition
+           WHERE state_code = :stateCode
+           ORDER BY deed_type_code, version DESC
+          """, new MapSqlParameterSource("stateCode", stateCode)));
+        return out;
+          }
+
+          public void updateModule(String stateCode, String module, boolean enabled, String mode,
+                 String ownerDepartment, Integer slaDays, String notes) {
+        int changed = jdbc.update("""
+          UPDATE cfg.state_module_config
+             SET enabled = :enabled, mode = :mode, owner_department = :ownerDepartment,
+                 sla_days = :slaDays, notes = :notes
+           WHERE state_code = :stateCode AND module = :module
+             AND effective_from <= current_date
+             AND (effective_to IS NULL OR effective_to >= current_date)
+          """, new MapSqlParameterSource().addValue("stateCode", stateCode)
+          .addValue("module", module).addValue("enabled", enabled).addValue("mode", mode)
+          .addValue("ownerDepartment", ownerDepartment).addValue("slaDays", slaDays)
+          .addValue("notes", notes));
+        if (changed == 0) throw ApiException.notFound("Module " + module);
+          }
+
+          public void updateFeatureFlag(String stateCode, String flagCode, boolean enabled) {
+        int changed = jdbc.update("""
+          UPDATE cfg.feature_flag SET enabled = :enabled
+                 WHERE flag_code = :flagCode
+                   AND (state_code = :stateCode OR (state_code = '*' AND NOT EXISTS (
+                       SELECT 1 FROM cfg.feature_flag WHERE flag_code = :flagCode AND state_code = :stateCode
+                   )))
+          """, new MapSqlParameterSource().addValue("stateCode", stateCode)
+          .addValue("flagCode", flagCode).addValue("enabled", enabled));
+        if (changed == 0) throw ApiException.notFound("Feature flag " + flagCode);
+          }
+
+      public void updateWorkflowStatus(String stateCode, long workflowId, String status, long publishedBy) {
+        if (!List.of("DRAFT", "PUBLISHED", "RETIRED").contains(status)) {
+          throw new IllegalArgumentException("Unsupported workflow status");
+        }
+        int changed = jdbc.update("""
+            UPDATE cfg.workflow_definition
+               SET status = :status,
+                 published_at = CASE WHEN :status = 'PUBLISHED' THEN now() ELSE published_at END,
+                 published_by = CASE WHEN :status = 'PUBLISHED' THEN :publishedBy ELSE published_by END
+             WHERE id = :workflowId AND state_code = :stateCode
+            """, new MapSqlParameterSource().addValue("stateCode", stateCode)
+            .addValue("workflowId", workflowId).addValue("status", status)
+            .addValue("publishedBy", publishedBy));
+        if (changed == 0) throw ApiException.notFound("Workflow " + workflowId);
+      }
+
     /** The published workflow (stages + transitions) for a deed type. */
     public Map<String, Object> workflow(String stateCode, String deedTypeCode) {
         var params = new MapSqlParameterSource()

@@ -80,6 +80,73 @@ public class UserRepository {
         return username == null ? Optional.empty() : findByUsername(username);
     }
 
+    public List<Map<String, Object>> adminUsers(String stateCode) {
+        return jdbc.queryForList("""
+                SELECT u.id, u.username, u.full_name, u.email, u.mobile, u.designation,
+                       u.department, u.state_code, u.status, u.mfa_required,
+                       COALESCE(array_agg(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS roles
+                  FROM sec.user u
+                  LEFT JOIN sec.user_role ur ON ur.user_id = u.id
+                  LEFT JOIN sec.role r ON r.id = ur.role_id
+                 WHERE u.state_code = :stateCode
+                 GROUP BY u.id
+                 ORDER BY u.full_name, u.username
+                """, new MapSqlParameterSource("stateCode", stateCode));
+    }
+
+    public List<Map<String, Object>> roles() {
+        return jdbc.queryForList("""
+                SELECT code, name, department, description
+                  FROM sec.role ORDER BY name
+                """, new MapSqlParameterSource());
+    }
+
+    public long createUser(String stateCode, String username, String fullName, String email, String mobile,
+                           String designation, String department, String passwordHash, String status,
+                           boolean mfaRequired, List<String> roleCodes) {
+        long userId = jdbc.queryForObject("""
+                INSERT INTO sec.user (state_code, username, full_name, email, mobile, designation,
+                                     department, password_hash, status, mfa_required)
+                VALUES (:stateCode, :username, :fullName, :email, :mobile, :designation,
+                        :department, :passwordHash, :status, :mfaRequired)
+                RETURNING id
+                """, new MapSqlParameterSource()
+                .addValue("stateCode", stateCode).addValue("username", username)
+                .addValue("fullName", fullName).addValue("email", email).addValue("mobile", mobile)
+                .addValue("designation", designation).addValue("department", department)
+                .addValue("passwordHash", passwordHash).addValue("status", status)
+                .addValue("mfaRequired", mfaRequired), Long.class);
+        replaceRoles(userId, roleCodes);
+        return userId;
+    }
+
+    public void updateUser(long userId, String stateCode, String fullName, String email, String mobile,
+                           String designation, String department, String status, boolean mfaRequired,
+                           List<String> roleCodes) {
+        jdbc.update("""
+                UPDATE sec.user
+                   SET full_name = :fullName, email = :email, mobile = :mobile,
+                       designation = :designation, department = :department,
+                       status = :status, mfa_required = :mfaRequired
+                 WHERE id = :userId AND state_code = :stateCode
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId).addValue("stateCode", stateCode)
+                .addValue("fullName", fullName).addValue("email", email).addValue("mobile", mobile)
+                .addValue("designation", designation).addValue("department", department)
+                .addValue("status", status).addValue("mfaRequired", mfaRequired));
+        replaceRoles(userId, roleCodes);
+    }
+
+    private void replaceRoles(long userId, List<String> roleCodes) {
+        var params = new MapSqlParameterSource("userId", userId);
+        jdbc.update("DELETE FROM sec.user_role WHERE user_id = :userId", params);
+        if (roleCodes == null || roleCodes.isEmpty()) return;
+        jdbc.update("""
+                INSERT INTO sec.user_role (user_id, role_id)
+                SELECT :userId, id FROM sec.role WHERE code IN (:roleCodes)
+                """, params.addValue("roleCodes", roleCodes));
+    }
+
     public CurrentUser toCurrentUser(UserRow row) {
         var p = new MapSqlParameterSource("userId", row.id());
         Set<String> roles = new HashSet<>(jdbc.queryForList("""

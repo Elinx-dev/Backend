@@ -85,6 +85,11 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
 
+management:
+  health:
+    mail:
+      enabled: ${SLATE_MAIL_ENABLED:false}
+
 logging:
   level:
     in.gov.slate: INFO
