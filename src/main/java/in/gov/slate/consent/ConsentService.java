@@ -57,7 +57,8 @@ public class ConsentService {
                     INSERT INTO core.consent_record (transaction_id, party_id, aadhaar_hash, otp_request_reference,
                         status, requested_at, officer_user_id, consent_text_version)
                     SELECT :txnId, p.id, p.aadhaar_hash, :reference, 'PENDING', now(), :officer, :consentVersion
-                      FROM core.transaction_party p WHERE p.id = :partyId
+                      FROM core.transaction_party p
+                     WHERE p.id = :partyId AND p.is_active = 'Y'
                     ON CONFLICT (transaction_id, party_id) DO UPDATE
                         SET otp_request_reference = EXCLUDED.otp_request_reference,
                             status = 'PENDING',
@@ -137,7 +138,7 @@ public class ConsentService {
                        c.otp_request_reference, c.requested_at, c.verified_at, c.attempt_count
                   FROM core.transaction_party p
                   LEFT JOIN core.consent_record c ON c.party_id = p.id
-                 WHERE p.transaction_id = :txnId
+                 WHERE p.transaction_id = :txnId AND p.is_active = 'Y'
                  ORDER BY p.side, p.seq
                 """, new MapSqlParameterSource("txnId", ctx.id()));
     }

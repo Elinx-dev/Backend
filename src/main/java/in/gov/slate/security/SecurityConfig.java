@@ -38,8 +38,11 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .cors(Customizer.withDefaults())
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .exceptionHandling(ex -> ex.authenticationEntryPoint(
+                    (request, response, authException) -> response.sendError(401)))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/login").permitAll()
+                .requestMatchers("/api/auth/public-key", "/api/auth/login", "/api/auth/mfa/verify",
+                        "/api/auth/password-reset/request", "/api/auth/password-reset/confirm").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/public/**").permitAll()
                 .requestMatchers("/mock/**").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()

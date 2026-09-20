@@ -25,15 +25,35 @@ public class UserRepository {
 
     public record UserRow(long id, String username, String fullName, String email, String mobile,
                           String designation, String department, String stateCode, String passwordHash,
-                          String status, int failedLoginCount) {
+                          boolean mfaRequired, String status, int failedLoginCount) {
+    }
+
+    public record LoginOtpRow(long userId, String otpHash, OffsetDateTime expiresAt,
+                              OffsetDateTime consumedAt, int attemptCount) {
+    }
+
+    public record PasswordResetRow(long id, long userId, OffsetDateTime expiresAt, OffsetDateTime consumedAt) {
     }
 
     public Optional<UserRow> findByUsername(String username) {
-        var rows = jdbc.queryForList("""
+        return findUser("""
                 SELECT id, username::text AS username, full_name, email::text AS email, mobile, designation,
-                       department, state_code, password_hash, status, failed_login_count
-                  FROM sec.user WHERE username = :username
-                """, new MapSqlParameterSource("username", username));
+                       department, state_code, password_hash, mfa_required, status, failed_login_count
+                  FROM sec.user WHERE username = :identifier
+                """, new MapSqlParameterSource("identifier", username));
+    }
+
+    public Optional<UserRow> findByLoginId(String loginId) {
+        return findUser("""
+                SELECT id, username::text AS username, full_name, email::text AS email, mobile, designation,
+                       department, state_code, password_hash, mfa_required, status, failed_login_count
+                  FROM sec.user
+                 WHERE username = :identifier OR email = :identifier
+                """, new MapSqlParameterSource("identifier", loginId));
+    }
+
+    private Optional<UserRow> findUser(String sql, MapSqlParameterSource params) {
+        var rows = jdbc.queryForList(sql, params);
         if (rows.isEmpty()) {
             return Optional.empty();
         }
@@ -48,6 +68,7 @@ public class UserRepository {
                 (String) r.get("department"),
                 (String) r.get("state_code"),
                 (String) r.get("password_hash"),
+                Boolean.TRUE.equals(r.get("mfa_required")),
                 (String) r.get("status"),
                 ((Number) r.get("failed_login_count")).intValue()));
     }
@@ -103,10 +124,59 @@ public class UserRepository {
                 new MapSqlParameterSource("id", userId));
     }
 
+    public void createLoginOtp(long userId, UUID challengeId, String otpHash, OffsetDateTime expiresAt) {
+        var params = new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("challengeId", challengeId)
+                .addValue("otpHash", otpHash)
+                .addValue("expiresAt", expiresAt);
+        jdbc.update("""
+                UPDATE sec.login_otp
+                   SET consumed_at = now()
+                 WHERE user_id = :userId AND consumed_at IS NULL
+                """, params);
+        jdbc.update("""
+                INSERT INTO sec.login_otp (user_id, otp_hash, challenge_id, expires_at)
+                VALUES (:userId, :otpHash, :challengeId, :expiresAt)
+                """, params);
+    }
+
+    public Optional<LoginOtpRow> findLoginOtpForUpdate(UUID challengeId) {
+        LoginOtpRow row = jdbc.query("""
+                SELECT user_id, otp_hash, expires_at, consumed_at, attempt_count
+                  FROM sec.login_otp
+                 WHERE challenge_id = :challengeId
+                   FOR UPDATE
+                """, new MapSqlParameterSource("challengeId", challengeId),
+                rs -> rs.next() ? new LoginOtpRow(
+                        rs.getLong("user_id"),
+                        rs.getString("otp_hash"),
+                        rs.getObject("expires_at", OffsetDateTime.class),
+                        rs.getObject("consumed_at", OffsetDateTime.class),
+                        rs.getInt("attempt_count")) : null);
+        return Optional.ofNullable(row);
+    }
+
+    public void recordLoginOtpFailure(UUID challengeId) {
+        jdbc.update("""
+                UPDATE sec.login_otp
+                   SET attempt_count = attempt_count + 1
+                 WHERE challenge_id = :challengeId AND consumed_at IS NULL
+                """, new MapSqlParameterSource("challengeId", challengeId));
+    }
+
+    public void consumeLoginOtp(UUID challengeId) {
+        jdbc.update("""
+                UPDATE sec.login_otp
+                   SET consumed_at = now()
+                 WHERE challenge_id = :challengeId AND consumed_at IS NULL
+                """, new MapSqlParameterSource("challengeId", challengeId));
+    }
+
     public void openSession(long userId, UUID jti, OffsetDateTime expiresAt, String ip, String userAgent) {
         jdbc.update("""
-                INSERT INTO sec.user_session (user_id, jti, expires_at, ip_address, user_agent)
-                VALUES (:userId, :jti, :expiresAt, :ip, :ua)
+                INSERT INTO sec.user_session (user_id, jti, expires_at, last_activity_at, ip_address, user_agent)
+                VALUES (:userId, :jti, :expiresAt, now(), :ip, :ua)
                 """, new MapSqlParameterSource()
                 .addValue("userId", userId)
                 .addValue("jti", jti)
@@ -115,16 +185,86 @@ public class UserRepository {
                 .addValue("ua", userAgent));
     }
 
-    public boolean isSessionActive(UUID jti) {
+    public boolean isSessionActive(UUID jti, OffsetDateTime activeAfter) {
         Integer count = jdbc.queryForObject("""
                 SELECT count(*) FROM sec.user_session
-                 WHERE jti = :jti AND revoked_at IS NULL AND expires_at > now()
-                """, new MapSqlParameterSource("jti", jti), Integer.class);
+                 WHERE jti = :jti
+                   AND revoked_at IS NULL
+                   AND expires_at > now()
+                   AND last_activity_at > :activeAfter
+                """, new MapSqlParameterSource()
+                .addValue("jti", jti)
+                .addValue("activeAfter", activeAfter), Integer.class);
         return count != null && count > 0;
+    }
+
+    public void touchSession(UUID jti) {
+        jdbc.update("""
+                UPDATE sec.user_session
+                   SET last_activity_at = now()
+                 WHERE jti = :jti AND revoked_at IS NULL
+                """, new MapSqlParameterSource("jti", jti));
     }
 
     public void revokeSession(UUID jti) {
         jdbc.update("UPDATE sec.user_session SET revoked_at = now() WHERE jti = :jti AND revoked_at IS NULL",
                 new MapSqlParameterSource("jti", jti));
+    }
+
+    public void revokeAllSessions(long userId) {
+        jdbc.update("UPDATE sec.user_session SET revoked_at = now() WHERE user_id = :userId AND revoked_at IS NULL",
+                new MapSqlParameterSource("userId", userId));
+    }
+
+    public void createPasswordResetToken(long userId, byte[] tokenHash, OffsetDateTime expiresAt) {
+        var params = new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("tokenHash", tokenHash)
+                .addValue("expiresAt", expiresAt);
+        jdbc.update("""
+                UPDATE sec.password_reset_token
+                   SET consumed_at = now()
+                 WHERE user_id = :userId AND consumed_at IS NULL
+                """, params);
+        jdbc.update("""
+                INSERT INTO sec.password_reset_token (user_id, token_hash, expires_at)
+                VALUES (:userId, :tokenHash, :expiresAt)
+                """, params);
+    }
+
+    public Optional<PasswordResetRow> findPasswordResetForUpdate(byte[] tokenHash) {
+        PasswordResetRow row = jdbc.query("""
+                SELECT id, user_id, expires_at, consumed_at
+                  FROM sec.password_reset_token
+                 WHERE token_hash = :tokenHash
+                   FOR UPDATE
+                """, new MapSqlParameterSource("tokenHash", tokenHash),
+                rs -> rs.next() ? new PasswordResetRow(
+                        rs.getLong("id"),
+                        rs.getLong("user_id"),
+                        rs.getObject("expires_at", OffsetDateTime.class),
+                        rs.getObject("consumed_at", OffsetDateTime.class)) : null);
+        return Optional.ofNullable(row);
+    }
+
+    public void updatePassword(long userId, String passwordHash) {
+        jdbc.update("""
+                UPDATE sec.user
+                   SET password_hash = :passwordHash,
+                       password_changed_at = now(),
+                       failed_login_count = 0,
+                       status = CASE WHEN status = 'LOCKED' THEN 'ACTIVE' ELSE status END
+                 WHERE id = :userId
+                """, new MapSqlParameterSource()
+                .addValue("userId", userId)
+                .addValue("passwordHash", passwordHash));
+    }
+
+    public void consumePasswordReset(long resetId) {
+        jdbc.update("""
+                UPDATE sec.password_reset_token
+                   SET consumed_at = now()
+                 WHERE id = :id AND consumed_at IS NULL
+                """, new MapSqlParameterSource("id", resetId));
     }
 }

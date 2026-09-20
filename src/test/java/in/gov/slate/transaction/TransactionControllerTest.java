@@ -16,6 +16,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import in.gov.slate.common.IdempotencyService;
+import in.gov.slate.security.JwtAuthFilter;
 
 @WebMvcTest(TransactionController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -29,6 +30,9 @@ class TransactionControllerTest {
 
     @MockBean
     private IdempotencyService idempotency;
+
+    @MockBean
+    private JwtAuthFilter jwtAuthFilter;
 
     @Test
     void detailAcceptsRefPrefixedRoute() throws Exception {

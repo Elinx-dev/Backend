@@ -21,17 +21,38 @@ spring:
     default-property-inclusion: non_null
     serialization:
       write-dates-as-timestamps: false
+  mail:
+    host: ${SLATE_SMTP_HOST:localhost}
+    port: ${SLATE_SMTP_PORT:1025}
+    username: ${SLATE_SMTP_USERNAME:}
+    password: ${SLATE_SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${SLATE_SMTP_AUTH:false}
+          starttls:
+            enable: ${SLATE_SMTP_STARTTLS:false}
 
 slate:
   jwt:
     secret: ${SLATE_JWT_SECRET:local-demo-only-secret-key-please-override-in-any-real-environment}
-    access-token-minutes: ${SLATE_JWT_MINUTES:15}
+    access-token-minutes: ${SLATE_JWT_MINUTES:10}
+  session:
+    idle-timeout-minutes: ${SLATE_IDLE_TIMEOUT_MINUTES:10}
   otp:
     # Officer login OTP and Aadhaar party-consent OTP are two different things.
     # In the local demo both are served by deterministic mock connectors.
     officer-demo-otp: ${SLATE_OFFICER_OTP:123456}
     aadhaar-demo-otp: ${SLATE_AADHAAR_OTP:654321}
     validity-seconds: 300
+  password-reset:
+    validity-minutes: ${SLATE_PASSWORD_RESET_MINUTES:15}
+  mail:
+    # Set enabled=true and provide the spring.mail SMTP settings outside local demo use.
+    enabled: ${SLATE_MAIL_ENABLED:false}
+    from: ${SLATE_MAIL_FROM:no-reply@slate.gov.in}
+    reset-base-url: ${SLATE_RESET_BASE_URL:http://localhost:5173/reset-password}
+    expose-demo-secrets: ${SLATE_EXPOSE_DEMO_SECRETS:true}
   aadhaar:
     # Raw Aadhaar is never persisted. Parties are stored as a salted SHA-256 hash
     # plus the last four digits; the salt itself lives outside the database.
