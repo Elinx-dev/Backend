@@ -11,6 +11,7 @@ import java.util.UUID;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import in.gov.slate.common.CurrentUser;
 
@@ -101,6 +102,7 @@ public class UserRepository {
                 """, new MapSqlParameterSource());
     }
 
+    @Transactional
     public long createUser(String stateCode, String username, String fullName, String email, String mobile,
                            String designation, String department, String passwordHash, String status,
                            boolean mfaRequired, List<String> roleCodes) {
@@ -120,6 +122,7 @@ public class UserRepository {
         return userId;
     }
 
+    @Transactional
     public void updateUser(long userId, String stateCode, String fullName, String email, String mobile,
                            String designation, String department, String status, boolean mfaRequired,
                            List<String> roleCodes) {

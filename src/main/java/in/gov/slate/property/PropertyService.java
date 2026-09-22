@@ -35,7 +35,8 @@ public class PropertyService {
         this.audit = audit;
     }
 
-    public record OwnerInput(@NotBlank String ownerName, BigDecimal sharePct, String shareNote) {
+    public record OwnerInput(@NotBlank String ownerName, String aadhaarNumber, String pan, String address,
+                             BigDecimal sharePct, String shareNote) {
     }
 
     public record CreatePropertyRequest(
@@ -149,11 +150,16 @@ public class PropertyService {
         if (req.owners() != null) {
             for (OwnerInput o : req.owners()) {
                 jdbc.update("""
-                        INSERT INTO core.property_owner (property_id, owner_name, share_pct, share_note, source, effective_from)
-                        VALUES (:propertyId, :name, :share, :note, 'PROPERTY_ENTRY', current_date)
+                        INSERT INTO core.property_owner (property_id, owner_name, aadhaar_number, pan, address,
+                            share_pct, share_note, source, effective_from)
+                        VALUES (:propertyId, :name, :aadhaarNumber, :pan, :address, :share, :note,
+                            'PROPERTY_ENTRY', current_date)
                         """, new MapSqlParameterSource()
                         .addValue("propertyId", id)
                         .addValue("name", o.ownerName())
+                        .addValue("aadhaarNumber", o.aadhaarNumber())
+                        .addValue("pan", o.pan())
+                        .addValue("address", o.address())
                         .addValue("share", o.sharePct())
                         .addValue("note", o.shareNote()));
             }
@@ -179,7 +185,7 @@ public class PropertyService {
         long id = ((Number) property.get("id")).longValue();
         var idParam = new MapSqlParameterSource("propertyId", id);
         property.put("registeredOwners", jdbc.queryForList("""
-                SELECT owner_name, share_pct, share_note, source, effective_from
+                SELECT owner_name, aadhaar_number, pan, address, share_pct, share_note, source, effective_from
                   FROM core.property_owner WHERE property_id = :propertyId AND effective_to IS NULL
                  ORDER BY id
                 """, idParam));

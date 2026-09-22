@@ -88,7 +88,7 @@ public class TransactionRepository {
                 """, txnParam);
 
         List<Map<String, Object>> owners = jdbc.queryForList("""
-                SELECT owner_name, share_pct, source FROM core.property_owner
+                SELECT owner_name, aadhaar_number, pan, address, share_pct, source FROM core.property_owner
                  WHERE property_id = :propertyId AND effective_to IS NULL ORDER BY id
                 """, propParam);
 
