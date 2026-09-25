@@ -15,6 +15,7 @@ import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.connectors.AadhaarConnector;
 import in.gov.slate.transaction.TransactionRepository;
+import in.gov.slate.transaction.WorkflowEngine;
 
 /**
  * Aadhaar OTP consent, captured per party. Only the salted hash, the last four
@@ -26,13 +27,15 @@ public class ConsentService {
     private final NamedParameterJdbcTemplate jdbc;
     private final AadhaarConnector aadhaar;
     private final TransactionRepository repository;
+    private final WorkflowEngine workflow;
     private final AuditService audit;
 
     public ConsentService(NamedParameterJdbcTemplate jdbc, AadhaarConnector aadhaar,
-                          TransactionRepository repository, AuditService audit) {
+                          TransactionRepository repository, WorkflowEngine workflow, AuditService audit) {
         this.jdbc = jdbc;
         this.aadhaar = aadhaar;
         this.repository = repository;
+        this.workflow = workflow;
         this.audit = audit;
     }
 
@@ -41,6 +44,7 @@ public class ConsentService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("CONSENT_CAPTURE");
         var ctx = repository.load(txnRef, user.stateCode());
+        workflow.requireStatus(ctx, "CONSENT_PENDING", "Consent OTP request", user);
         String consentTextVersion = consentTextVersion();
 
         List<Map<String, Object>> out = new ArrayList<>();
@@ -95,6 +99,7 @@ public class ConsentService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("CONSENT_CAPTURE");
         var ctx = repository.load(txnRef, user.stateCode());
+        workflow.requireStatus(ctx, "CONSENT_PENDING", "Consent verification", user);
 
         var rows = jdbc.queryForList("""
                 SELECT id, otp_request_reference, status, attempt_count

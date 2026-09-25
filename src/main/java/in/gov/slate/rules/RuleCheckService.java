@@ -21,6 +21,7 @@ import in.gov.slate.common.CurrentUser;
 import in.gov.slate.common.Hashes;
 import in.gov.slate.transaction.TransactionContext;
 import in.gov.slate.transaction.TransactionRepository;
+import in.gov.slate.transaction.WorkflowEngine;
 
 /**
  * Runs the configured rule engines for a transaction and stores their results.
@@ -32,16 +33,18 @@ public class RuleCheckService {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final TransactionRepository repository;
+    private final WorkflowEngine workflow;
     private final List<RuleEngine> engines;
     private final AuditService audit;
     private final ObjectMapper mapper;
     private final String connectorMode;
 
     public RuleCheckService(NamedParameterJdbcTemplate jdbc, TransactionRepository repository,
-                            List<RuleEngine> engines, AuditService audit, ObjectMapper mapper,
+                            WorkflowEngine workflow, List<RuleEngine> engines, AuditService audit, ObjectMapper mapper,
                             @Value("${slate.connectors.mode}") String connectorMode) {
         this.jdbc = jdbc;
         this.repository = repository;
+        this.workflow = workflow;
         this.engines = engines;
         this.audit = audit;
         this.mapper = mapper;
@@ -54,6 +57,7 @@ public class RuleCheckService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("RULE_CHECK_RUN");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
+        workflow.requireStatus(ctx, "RULE_CHECK_PENDING", "Rule checks", user);
         String effectiveMode = mode == null ? "PILOT_CURRENT_RECONCILIATION" : mode;
         LocalDate assessedOn = assessmentDate == null ? LocalDate.now() : assessmentDate;
 

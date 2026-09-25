@@ -18,6 +18,7 @@ import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.transaction.TransactionContext;
 import in.gov.slate.transaction.TransactionRepository;
+import in.gov.slate.transaction.WorkflowEngine;
 
 /**
  * Guideline value and fee computation. Every figure is derived from the
@@ -31,13 +32,15 @@ public class FeeService {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final TransactionRepository repository;
+    private final WorkflowEngine workflow;
     private final AuditService audit;
     private final ObjectMapper mapper;
 
-    public FeeService(NamedParameterJdbcTemplate jdbc, TransactionRepository repository, AuditService audit,
-                      ObjectMapper mapper) {
+    public FeeService(NamedParameterJdbcTemplate jdbc, TransactionRepository repository, WorkflowEngine workflow,
+                      AuditService audit, ObjectMapper mapper) {
         this.jdbc = jdbc;
         this.repository = repository;
+        this.workflow = workflow;
         this.audit = audit;
         this.mapper = mapper;
     }
@@ -102,6 +105,7 @@ public class FeeService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("FEE_CALCULATE");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
+        workflow.requireStatus(ctx, "FEE_PAYMENT_PENDING", "Fee calculation", user);
 
         Map<String, Object> guideline = guidelineValueOf(ctx);
         BigDecimal guidelineValue = (BigDecimal) guideline.get("guidelineValue");

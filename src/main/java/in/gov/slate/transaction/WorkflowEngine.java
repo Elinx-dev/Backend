@@ -45,23 +45,21 @@ public class WorkflowEngine {
                 .toList();
     }
 
-    public String apply(TransactionContext ctx, String actionCode, String reason, CurrentUser user) {
-        Map<String, Object> transition = transitionsFrom(ctx).stream()
-                .filter(t -> actionCode.equals(t.get("action_code")))
-                .findFirst()
-                .orElseThrow(() -> ApiException.conflict(
-                        "Action " + actionCode + " is not available from status " + ctx.status()));
-
-        if (!roleAllowed(transition, user)) {
-            throw ApiException.forbidden("Your role may not perform " + actionCode);
+    public void requireStatus(TransactionContext ctx, String requiredStatus, String operation, CurrentUser user) {
+        if (!requiredStatus.equals(ctx.status())) {
+            throw unavailableFromStatus(ctx, operation, List.of(requiredStatus), user);
         }
+    }
+
+    public void requireAvailable(TransactionContext ctx, String actionCode, CurrentUser user) {
+        validateTransitionAccess(ctx, transitionFor(ctx, actionCode, user), actionCode, user);
+    }
+
+    public String apply(TransactionContext ctx, String actionCode, String reason, CurrentUser user) {
+        Map<String, Object> transition = transitionFor(ctx, actionCode, user);
+        validateTransitionAccess(ctx, transition, actionCode, user);
         if (Boolean.TRUE.equals(transition.get("requires_reason")) && (reason == null || reason.isBlank())) {
             throw ApiException.badRequest("A reason is required for " + actionCode);
-        }
-        if (!guardPasses(transition, ctx)) {
-            // Surface the specific validation failures rather than a bare guard name.
-            validation.evaluate(ctx, "TRANSACTION", true);
-            throw ApiException.conflict("Guard " + transition.get("guard_expr") + " is not satisfied");
         }
 
         String toStatus = (String) transition.get("to_status");
@@ -84,6 +82,60 @@ public class WorkflowEngine {
                 ctx.propertyRef(), Map.of("status", ctx.status()),
                 Map.of("status", toStatus, "stage", stage), "SUCCESS", reason);
         return toStatus;
+    }
+
+    private Map<String, Object> transitionFor(TransactionContext ctx, String actionCode, CurrentUser user) {
+        List<Map<String, Object>> transitions = transitionsFrom(ctx);
+        return transitions.stream()
+                .filter(t -> actionCode.equals(t.get("action_code")))
+                .findFirst()
+                .orElseThrow(() -> unavailableFromStatus(ctx, "Action " + actionCode,
+                        requiredStatuses(ctx, actionCode), user));
+    }
+
+    private void validateTransitionAccess(TransactionContext ctx, Map<String, Object> transition, String actionCode,
+                                          CurrentUser user) {
+        if (!roleAllowed(transition, user)) {
+            throw ApiException.forbidden("Your role may not perform " + actionCode);
+        }
+        if (!guardPasses(transition, ctx)) {
+            // Surface the specific validation failures rather than a bare guard name.
+            validation.evaluate(ctx, "TRANSACTION", true);
+            throw ApiException.conflict("Guard " + transition.get("guard_expr") + " is not satisfied");
+        }
+    }
+
+    private List<String> requiredStatuses(TransactionContext ctx, String actionCode) {
+        return jdbc.queryForList("""
+                SELECT DISTINCT from_status
+                  FROM cfg.workflow_transition
+                 WHERE workflow_id = :workflowId AND action_code = :actionCode
+                 ORDER BY from_status
+                """, new MapSqlParameterSource()
+                .addValue("workflowId", ctx.transaction().get("workflow_id"))
+                .addValue("actionCode", actionCode), String.class);
+    }
+
+    private ApiException unavailableFromStatus(TransactionContext ctx, String operation, List<String> requiredStatuses,
+                                               CurrentUser user) {
+        StringBuilder message = new StringBuilder(operation)
+                .append(" cannot be performed from status ")
+                .append(ctx.status());
+        if (!requiredStatuses.isEmpty()) {
+            message.append(". Required status");
+            message.append(requiredStatuses.size() == 1 ? ": " : "es: ");
+            message.append(String.join(", ", requiredStatuses));
+        }
+        List<String> available = availableActions(ctx, user).stream()
+                .map(action -> action.get("actionCode").toString())
+                .toList();
+        if (!available.isEmpty()) {
+            message.append(". Available actions from ")
+                    .append(ctx.status())
+                    .append(": ")
+                    .append(String.join(", ", available));
+        }
+        return ApiException.conflict(message.toString());
     }
 
     private List<Map<String, Object>> transitionsFrom(TransactionContext ctx) {

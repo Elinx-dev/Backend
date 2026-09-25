@@ -16,17 +16,21 @@ import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.transaction.TransactionContext;
 import in.gov.slate.transaction.TransactionRepository;
+import in.gov.slate.transaction.WorkflowEngine;
 
 @Service
 public class PaymentService {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final TransactionRepository repository;
+    private final WorkflowEngine workflow;
     private final AuditService audit;
 
-    public PaymentService(NamedParameterJdbcTemplate jdbc, TransactionRepository repository, AuditService audit) {
+    public PaymentService(NamedParameterJdbcTemplate jdbc, TransactionRepository repository, WorkflowEngine workflow,
+                          AuditService audit) {
         this.jdbc = jdbc;
         this.repository = repository;
+        this.workflow = workflow;
         this.audit = audit;
     }
 
@@ -38,6 +42,7 @@ public class PaymentService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("PAYMENT_RECORD");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
+        workflow.requireStatus(ctx, "FEE_PAYMENT_PENDING", "Payment recording", user);
         if (ctx.totalPayable() == null) {
             throw ApiException.conflict("Fees have not been calculated for " + txnRef);
         }

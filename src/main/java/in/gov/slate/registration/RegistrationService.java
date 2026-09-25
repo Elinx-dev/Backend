@@ -68,6 +68,7 @@ public class RegistrationService {
         if ("REGISTERED".equals(ctx.status())) {
             throw ApiException.conflict("Transaction " + txnRef + " is already registered");
         }
+        workflow.requireAvailable(ctx, "REGISTER", user);
         validation.evaluate(ctx, "REGISTRATION", true);
 
         List<TokenService.Owner> resultingOwners = resultingOwners(ctx);
