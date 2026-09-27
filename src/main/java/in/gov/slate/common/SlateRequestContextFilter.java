@@ -24,11 +24,21 @@ public class SlateRequestContextFilter extends OncePerRequestFilter {
             requestId = UUID.randomUUID().toString();
         }
         RequestContext.set(requestId, request.getHeader("Idempotency-Key"), request.getHeader("X-State-Code"));
+        RequestContext.setHttp(request.getMethod(), request.getRequestURI(), clientIp(request),
+                request.getHeader("User-Agent"));
         response.setHeader("X-Request-Id", requestId);
         try {
             chain.doFilter(request, response);
         } finally {
             RequestContext.clear();
         }
+    }
+
+    private String clientIp(HttpServletRequest request) {
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            return forwarded.split(",")[0].trim();
+        }
+        return request.getRemoteAddr();
     }
 }

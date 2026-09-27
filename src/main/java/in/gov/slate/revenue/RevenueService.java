@@ -15,6 +15,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import in.gov.slate.common.ApiException;
+import in.gov.slate.common.AuditEvent;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.common.RevenueLandContext;
@@ -175,8 +176,14 @@ public class RevenueService {
 
         TransactionContext ctx = repository.load((String) mutation.get("txn_ref"), user.stateCode());
         workflow.apply(ctx, "DISPOSE_OBJECTION", req.remarks() != null ? req.remarks() : req.disposalDecision(), user);
-        audit.record("OBJECTION_DISPOSED", "MUTATION", String.valueOf(mutationId), ctx.txnRef(), ctx.propertyRef(),
-                Map.of("decision", String.valueOf(req.disposalDecision())), null);
+        audit.record(AuditEvent.of("OBJECTION_DISPOSED")
+                .category(AuditEvent.CATEGORY_APPROVAL)
+                .entity("MUTATION", String.valueOf(mutationId))
+                .transactionRef(ctx.txnRef())
+                .propertyRef(ctx.propertyRef())
+                .decision(disposalDecision(req.disposalDecision()))
+                .after(Map.of("decision", String.valueOf(req.disposalDecision())))
+                .detail(req.remarks()));
         return detail(mutationId);
     }
 
@@ -228,9 +235,31 @@ public class RevenueService {
                 .addValue("sourceRef", pushed.mutationNumber()));
 
         String status = workflow.apply(ctx, "TAHSILDAR_APPROVE", req.remarks(), user);
-        audit.record("MUTATION_APPROVED", "MUTATION", String.valueOf(mutationId), ctx.txnRef(), ctx.propertyRef(),
-                Map.of("status", status, "revenueRecordRef", pushed.revenueRecordRef()), null);
+        audit.record(AuditEvent.of("MUTATION_APPROVED")
+                .category(AuditEvent.CATEGORY_APPROVAL)
+                .entity("MUTATION", String.valueOf(mutationId))
+                .transactionRef(ctx.txnRef())
+                .propertyRef(ctx.propertyRef())
+                .decision(AuditEvent.DECISION_APPROVED)
+                .statusChange("TAHSILDAR_PENDING", status)
+                .after(Map.of("status", status, "revenueRecordRef", pushed.revenueRecordRef()))
+                .detail(req.remarks()));
         return detail(mutationId);
+    }
+
+    /** Maps the free-text objection disposal onto the audited approval decision. */
+    private String disposalDecision(String value) {
+        if (value == null) {
+            return null;
+        }
+        String upper = value.toUpperCase();
+        if (upper.contains("REJECT") || upper.contains("DISMISS")) {
+            return AuditEvent.DECISION_REJECTED;
+        }
+        if (upper.contains("ACCEPT") || upper.contains("ALLOW") || upper.contains("UPHELD")) {
+            return AuditEvent.DECISION_APPROVED;
+        }
+        return null;
     }
 
     private String registeredDocumentNo(long transactionId) {

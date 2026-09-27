@@ -15,6 +15,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import in.gov.slate.common.ApiException;
+import in.gov.slate.common.AuditEvent;
+import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -28,10 +30,12 @@ public class AdminController {
 
     private final UserRepository users;
     private final PasswordEncoder encoder;
+    private final AuditService audit;
 
-    public AdminController(UserRepository users, PasswordEncoder encoder) {
+    public AdminController(UserRepository users, PasswordEncoder encoder, AuditService audit) {
         this.users = users;
         this.encoder = encoder;
+        this.audit = audit;
     }
 
     public record UserRequest(@NotBlank @Size(max = 320) String username,
@@ -58,6 +62,11 @@ public class AdminController {
                 blankToNull(request.email()), blankToNull(request.mobile()), blankToNull(request.designation()),
                 request.department(), encoder.encode(request.password()), request.status(), request.mfaRequired(),
                 request.roles());
+        audit.record(AuditEvent.of("USER_CREATED")
+                .category(AuditEvent.CATEGORY_SECURITY)
+                .entity("USER", String.valueOf(id))
+                .after(snapshot(request))
+                .detail("Created user " + request.username().trim()));
         return Map.of("id", id);
     }
 
@@ -75,10 +84,29 @@ public class AdminController {
         users.updateUser(id, current.stateCode(), request.fullName().trim(), blankToNull(request.email()),
                 blankToNull(request.mobile()), blankToNull(request.designation()), request.department(),
                 request.status(), request.mfaRequired(), request.roles());
+        audit.record(AuditEvent.of("USER_UPDATED")
+                .category(AuditEvent.CATEGORY_SECURITY)
+                .entity("USER", String.valueOf(id))
+                .before(snapshot(user))
+                .after(snapshot(request))
+                .detail("Updated user " + user.username()));
         return Map.of("id", id);
     }
 
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    /** Audit payload for a user account; credentials are never part of it. */
+    private Map<String, Object> snapshot(UserRequest request) {
+        return Map.of("username", request.username().trim(), "fullName", request.fullName().trim(),
+                "department", request.department(), "status", request.status(),
+                "mfaRequired", request.mfaRequired(), "roles", request.roles());
+    }
+
+    private Map<String, Object> snapshot(UserRepository.UserRow user) {
+        return Map.of("username", String.valueOf(user.username()), "fullName", String.valueOf(user.fullName()),
+                "department", String.valueOf(user.department()), "status", String.valueOf(user.status()),
+                "mfaRequired", user.mfaRequired());
     }
 }

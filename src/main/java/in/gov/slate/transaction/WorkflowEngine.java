@@ -9,6 +9,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import in.gov.slate.common.ApiException;
+import in.gov.slate.common.AuditEvent;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.config.ConfigService;
@@ -78,9 +79,15 @@ public class WorkflowEngine {
                  WHERE id = :id
                 """, params);
 
-        audit.record("TRANSITION_" + actionCode, "TRANSACTION", String.valueOf(ctx.id()), ctx.txnRef(),
-                ctx.propertyRef(), Map.of("status", ctx.status()),
-                Map.of("status", toStatus, "stage", stage), "SUCCESS", reason);
+        audit.record(AuditEvent.of("TRANSITION_" + actionCode)
+                .entity("TRANSACTION", String.valueOf(ctx.id()))
+                .transactionRef(ctx.txnRef())
+                .propertyRef(ctx.propertyRef())
+                .statusChange(ctx.status(), toStatus)
+                .stageCode(stage)
+                .before(Map.of("status", ctx.status()))
+                .after(Map.of("status", toStatus, "stage", stage))
+                .detail(reason));
         return toStatus;
     }
 
