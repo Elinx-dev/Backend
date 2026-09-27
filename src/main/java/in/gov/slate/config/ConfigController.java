@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import in.gov.slate.common.AuditEvent;
+import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import org.springframework.security.access.prepost.PreAuthorize;
 
@@ -19,9 +21,11 @@ import org.springframework.security.access.prepost.PreAuthorize;
 public class ConfigController {
 
     private final ConfigService config;
+    private final AuditService audit;
 
-    public ConfigController(ConfigService config) {
+    public ConfigController(ConfigService config, AuditService audit) {
         this.config = config;
+        this.audit = audit;
     }
 
     public record ModuleUpdate(boolean enabled, String mode, String ownerDepartment, Integer slaDays, String notes) {}
@@ -39,12 +43,24 @@ public class ConfigController {
     public void updateModule(@PathVariable String module, @RequestBody ModuleUpdate request) {
         config.updateModule(CurrentUser.require().stateCode(), module, request.enabled(), request.mode(),
                 request.ownerDepartment(), request.slaDays(), request.notes());
+        audit.record(AuditEvent.of("CONFIG_MODULE_UPDATED")
+                .category(AuditEvent.CATEGORY_CONFIGURATION)
+                .entity("MODULE", module)
+                .after(Map.of("enabled", request.enabled(), "mode", String.valueOf(request.mode()),
+                        "ownerDepartment", String.valueOf(request.ownerDepartment()),
+                        "slaDays", String.valueOf(request.slaDays())))
+                .detail(request.notes()));
     }
 
     @PutMapping("/admin/feature-flags/{flagCode}")
     @PreAuthorize("hasRole('STATE_ADMIN')")
     public void updateFeatureFlag(@PathVariable String flagCode, @RequestBody FeatureFlagUpdate request) {
         config.updateFeatureFlag(CurrentUser.require().stateCode(), flagCode, request.enabled());
+        audit.record(AuditEvent.of("CONFIG_FEATURE_FLAG_UPDATED")
+                .category(AuditEvent.CATEGORY_CONFIGURATION)
+                .entity("FEATURE_FLAG", flagCode)
+                .after(Map.of("enabled", request.enabled()))
+                .detail(flagCode + " set to " + request.enabled()));
     }
 
     @PutMapping("/admin/workflows/{workflowId}")
@@ -52,6 +68,11 @@ public class ConfigController {
     public void updateWorkflow(@PathVariable long workflowId, @RequestBody WorkflowUpdate request) {
         config.updateWorkflowStatus(CurrentUser.require().stateCode(), workflowId, request.status(),
                 CurrentUser.require().id());
+        audit.record(AuditEvent.of("CONFIG_WORKFLOW_STATUS_UPDATED")
+                .category(AuditEvent.CATEGORY_CONFIGURATION)
+                .entity("WORKFLOW", String.valueOf(workflowId))
+                .statusChange(null, request.status())
+                .detail("Workflow " + workflowId + " set to " + request.status()));
     }
 
     @GetMapping("/bootstrap")
