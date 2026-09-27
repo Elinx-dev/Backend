@@ -198,15 +198,220 @@ public class PropertyService {
                 SELECT seq, executor_name, claimant_name, transaction_date, nature_of_transaction, reference_no
                   FROM core.chain_of_title WHERE property_id = :propertyId ORDER BY seq
                 """, idParam));
-        property.put("transactions", jdbc.queryForList("""
-                SELECT txn_ref, deed_type_code, status, current_stage_code, initiated_at, registered_at
-                  FROM core.transaction WHERE property_id = :propertyId ORDER BY initiated_at DESC
-                """, idParam));
+        property.put("transactions", transactionHistory(id));
+        property.put("propertyRelations", propertyRelations(id));
         if (Boolean.TRUE.equals(property.get("is_apartment_unit"))) {
             property.put("apartmentDetail", jdbc.queryForList(
                     "SELECT * FROM core.property_apartment_detail WHERE property_id = :propertyId", idParam));
         }
         return property;
+    }
+
+    private List<Map<String, Object>> transactionHistory(long propertyId) {
+        return jdbc.queryForList("""
+                SELECT tx.id AS transaction_id, tx.txn_ref,
+                       transaction_property.property_ref AS transaction_property_ref,
+                       tx.deed_type_code, tx.subtype, tx.transfer_scope,
+                       tx.status, tx.current_stage_code, tx.sro_code, tx.relationship_category,
+                       tx.declared_consideration, tx.mode_of_consideration,
+                       tx.extent_or_share_transferred, tx.extent_unit,
+                       tx.guideline_value AS guideline_value_at_registration,
+                       tx.guideline_value_reference, tx.basis_of_settlement, tx.share_being_released,
+                       tx.resulting_subparcel_count, tx.initiated_at, tx.registered_at,
+                       rr.registered_document_no, rr.registration_year, rr.registration_date,
+                       rr.registering_sro, rr.registration_status, rr.registration_reference,
+                       encode(rr.deed_sha256, 'hex') AS deed_sha256_hex,
+                       fc.valuation_basis_used, fc.valuation_amount, fc.stamp_duty, fc.registration_fee,
+                       fc.tds_amount, fc.other_charges, fc.total_payable, fc.calculated_at AS fee_calculated_at,
+                       COALESCE((
+                           SELECT sum(payment.amount) FILTER (WHERE payment.status = 'SUCCESS')
+                             FROM core.payment payment WHERE payment.transaction_id = tx.id
+                       ), 0) AS amount_paid,
+                       COALESCE((
+                           SELECT jsonb_agg(jsonb_build_object(
+                                      'name', party.name,
+                                      'role', party.role,
+                                      'existingSharePct', party.existing_share_pct,
+                                      'shareTransferredPct', party.share_transferred_pct,
+                                      'extentTransferred', party.extent_transferred
+                                  ) ORDER BY party.seq)
+                             FROM core.transaction_party party
+                            WHERE party.transaction_id = tx.id AND party.side = 'SIDE_1'
+                       ), '[]'::jsonb) AS old_owners,
+                       (
+                           SELECT string_agg(party.name, ', ' ORDER BY party.seq)
+                             FROM core.transaction_party party
+                            WHERE party.transaction_id = tx.id AND party.side = 'SIDE_1'
+                       ) AS old_owner_names,
+                       COALESCE(history.owner_set_json, (
+                           SELECT jsonb_agg(jsonb_build_object(
+                                      'name', party.name,
+                                      'role', party.role,
+                                      'shareTransferredPct', party.share_transferred_pct,
+                                      'resultingSharePct', party.resulting_share_pct,
+                                      'extentTransferred', party.extent_transferred
+                                  ) ORDER BY party.seq)
+                             FROM core.transaction_party party
+                            WHERE party.transaction_id = tx.id AND party.side = 'SIDE_2'
+                       ), '[]'::jsonb) AS new_owners,
+                       COALESCE((
+                           SELECT string_agg(owner.value ->> 'name', ', ' ORDER BY owner.ordinality)
+                             FROM jsonb_array_elements(history.owner_set_json)
+                                  WITH ORDINALITY AS owner(value, ordinality)
+                       ), (
+                           SELECT string_agg(party.name, ', ' ORDER BY party.seq)
+                             FROM core.transaction_party party
+                            WHERE party.transaction_id = tx.id AND party.side = 'SIDE_2'
+                       )) AS new_owner_names,
+                       COALESCE((
+                           SELECT jsonb_agg(jsonb_build_object(
+                                      'mode', payment.mode,
+                                      'referenceNo', payment.reference_no,
+                                      'amount', payment.amount,
+                                      'status', payment.status,
+                                      'paidAt', payment.paid_at
+                                  ) ORDER BY payment.paid_at)
+                             FROM core.payment payment WHERE payment.transaction_id = tx.id
+                       ), '[]'::jsonb) AS payments,
+                       token.token_ref, history.state_version AS token_state_version,
+                       history.operation AS token_operation,
+                       encode(history.owner_set_hash, 'hex') AS owner_set_hash_hex,
+                       encode(history.state_hash, 'hex') AS state_hash_hex,
+                       encode(history.prev_state_hash, 'hex') AS previous_state_hash_hex,
+                       encode(history.evidence_root, 'hex') AS evidence_root_hex,
+                       COALESCE(history.onchain_tx_hash, anchor.tx_hash) AS onchain_tx_hash,
+                       anchor.status AS blockchain_anchor_status, anchor.block_number,
+                       anchor.error_message AS blockchain_anchor_error,
+                       history.recorded_at AS chain_recorded_at,
+                       COALESCE((
+                           SELECT jsonb_agg(jsonb_build_object(
+                                      'stateVersion', state.state_version,
+                                      'operation', state.operation,
+                                      'ownerSet', state.owner_set_json,
+                                      'ownerSetHash', encode(state.owner_set_hash, 'hex'),
+                                      'stateHash', encode(state.state_hash, 'hex'),
+                                      'previousStateHash', encode(state.prev_state_hash, 'hex'),
+                                      'evidenceRoot', encode(state.evidence_root, 'hex'),
+                                      'onchainTxHash', COALESCE(state.onchain_tx_hash, state_anchor.tx_hash),
+                                      'anchorStatus', state_anchor.status,
+                                      'blockNumber', state_anchor.block_number,
+                                      'anchorError', state_anchor.error_message,
+                                      'recordedAt', state.recorded_at
+                                  ) ORDER BY state.state_version)
+                             FROM chain.token_state_history state
+                             LEFT JOIN LATERAL (
+                                 SELECT blockchain.status, blockchain.tx_hash, blockchain.block_number,
+                                        blockchain.error_message
+                                   FROM chain.blockchain_transaction blockchain
+                                  WHERE blockchain.token_id = state.token_id
+                                    AND blockchain.transaction_id = state.transaction_id
+                                    AND blockchain.args_json ->> 'stateHash' =
+                                        '0x' || encode(state.state_hash, 'hex')
+                                  ORDER BY blockchain.id DESC
+                                  LIMIT 1
+                             ) state_anchor ON TRUE
+                            WHERE state.token_id = token.id AND state.transaction_id = tx.id
+                       ), '[]'::jsonb) AS blockchain_states,
+                       CASE WHEN history.id IS NULL THEN 'OFF_CHAIN_TRANSACTION'
+                            ELSE 'BLOCKCHAIN_LINKED_REGISTRATION' END AS history_source
+                  FROM core.transaction tx
+                  JOIN core.property transaction_property ON transaction_property.id = tx.property_id
+                  LEFT JOIN core.registration_result rr ON rr.transaction_id = tx.id
+                  LEFT JOIN LATERAL (
+                      SELECT calculation.*
+                        FROM core.fee_calculation calculation
+                       WHERE calculation.transaction_id = tx.id
+                       ORDER BY calculation.calculated_at DESC, calculation.id DESC
+                       LIMIT 1
+                  ) fc ON TRUE
+                  LEFT JOIN chain.token token ON token.property_id = :propertyId
+                  LEFT JOIN LATERAL (
+                      SELECT state.*
+                        FROM chain.token_state_history state
+                       WHERE state.token_id = token.id AND state.transaction_id = tx.id
+                       ORDER BY CASE WHEN state.operation IN ('MINT', 'UPDATE', 'SPLIT') THEN 0 ELSE 1 END,
+                                state.state_version
+                       LIMIT 1
+                  ) history ON TRUE
+                  LEFT JOIN LATERAL (
+                      SELECT blockchain.status, blockchain.tx_hash, blockchain.block_number,
+                             blockchain.error_message
+                        FROM chain.blockchain_transaction blockchain
+                       WHERE blockchain.token_id = token.id AND blockchain.transaction_id = tx.id
+                         AND blockchain.args_json ->> 'stateHash' =
+                             '0x' || encode(history.state_hash, 'hex')
+                       ORDER BY blockchain.id DESC
+                       LIMIT 1
+                  ) anchor ON TRUE
+                 WHERE tx.property_id = :propertyId
+                    OR EXISTS (
+                        SELECT 1
+                          FROM chain.token_state_history related_history
+                         WHERE related_history.token_id = token.id
+                           AND related_history.transaction_id = tx.id
+                    )
+                 ORDER BY COALESCE(rr.registration_date, tx.registered_at::date, tx.initiated_at::date) DESC,
+                          tx.initiated_at DESC
+                """, new MapSqlParameterSource("propertyId", propertyId));
+    }
+
+    private List<Map<String, Object>> propertyRelations(long propertyId) {
+        return jdbc.queryForList("""
+                SELECT relation_type, property_ref, property_status, survey_no, subdivision_no,
+                       extent_value, extent_unit, token_ref, token_status, token_state_version,
+                       parent_token_ref, token_lineage_status, lineage_transaction_ref, parcel_sequence,
+                       official_subdivision_no
+                  FROM (
+                        SELECT 'PARENT' AS relation_type, parent.property_ref,
+                               parent.status AS property_status, parent.survey_no, parent.subdivision_no,
+                               parent.extent_value, parent.extent_unit, parent_token.token_ref,
+                               parent_token.status AS token_status,
+                               parent_token.state_version AS token_state_version,
+                               parent_token.token_ref AS parent_token_ref,
+                               CASE WHEN property_token.parent_token_id = parent_token.id
+                                    THEN 'TOKEN_LINKED' ELSE 'PROPERTY_LINK_ONLY'
+                               END AS token_lineage_status,
+                               lineage_tx.txn_ref AS lineage_transaction_ref,
+                               parcel.seq AS parcel_sequence,
+                               parcel.official_subdivision_no
+                          FROM core.property property
+                          JOIN core.property parent ON parent.id = property.parent_property_id
+                          LEFT JOIN chain.token parent_token ON parent_token.id = parent.token_id
+                          LEFT JOIN chain.token property_token ON property_token.id = property.token_id
+                          LEFT JOIN core.transaction lineage_tx
+                            ON lineage_tx.id = property_token.minted_txn_id
+                          LEFT JOIN survey.resulting_parcel parcel
+                            ON parcel.child_property_id = property.id
+                         WHERE property.id = :propertyId
+                        UNION ALL
+                        SELECT 'CHILD' AS relation_type, child.property_ref,
+                               child.status AS property_status, child.survey_no, child.subdivision_no,
+                               child.extent_value, child.extent_unit, child_token.token_ref,
+                               child_token.status AS token_status,
+                               child_token.state_version AS token_state_version,
+                               COALESCE(linked_parent_token.token_ref,
+                                        property_parent_token.token_ref) AS parent_token_ref,
+                               CASE WHEN linked_parent_token.id IS NOT NULL
+                                    THEN 'TOKEN_LINKED' ELSE 'PROPERTY_LINK_ONLY'
+                               END AS token_lineage_status,
+                               lineage_tx.txn_ref AS lineage_transaction_ref,
+                               parcel.seq AS parcel_sequence,
+                               parcel.official_subdivision_no
+                          FROM core.property child
+                          JOIN core.property property ON property.id = :propertyId
+                          LEFT JOIN chain.token child_token ON child_token.id = child.token_id
+                          LEFT JOIN chain.token linked_parent_token
+                            ON linked_parent_token.id = child_token.parent_token_id
+                          LEFT JOIN chain.token property_parent_token
+                            ON property_parent_token.id = property.token_id
+                          LEFT JOIN core.transaction lineage_tx
+                            ON lineage_tx.id = child_token.minted_txn_id
+                          LEFT JOIN survey.resulting_parcel parcel
+                            ON parcel.child_property_id = child.id
+                         WHERE child.parent_property_id = property.id
+                  ) relation
+                 ORDER BY CASE relation_type WHEN 'PARENT' THEN 0 ELSE 1 END, parcel_sequence, property_ref
+                """, new MapSqlParameterSource("propertyId", propertyId));
     }
 
     public List<Map<String, Object>> search(String query, String villageCode, String surveyNo, int limit) {

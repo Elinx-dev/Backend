@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import in.gov.slate.common.RevenueLandContext;
 import in.gov.slate.connectors.RevenueConnector;
 import in.gov.slate.connectors.model.RevenueModels.RevenueLookupRequest;
 import in.gov.slate.connectors.model.RevenueModels.RevenueOwner;
@@ -197,7 +198,7 @@ public class RevenueOwnershipEngine implements RuleEngine {
                 .addValue("village", ctx.property().get("village_code"))
                 .addValue("surveyNo", ctx.property().get("survey_no"))
                 .addValue("subdivisionNo", ctx.property().get("subdivision_no"))
-                .addValue("landType", ctx.property().get("land_type_code"))
+                .addValue("landType", snapshotLandType(ctx.property().get("land_type_code")))
                 .addValue("classification", response == null ? null : response.classification())
                 .addValue("extent", response == null ? null : response.extent())
                 .addValue("extentUnit", response == null ? null : response.extentUnit())
@@ -250,5 +251,9 @@ public class RevenueOwnershipEngine implements RuleEngine {
         } catch (Exception e) {
             throw new IllegalStateException("Cannot serialise Revenue payload", e);
         }
+    }
+
+    static String snapshotLandType(Object landType) {
+        return RevenueLandContext.forLegacySnapshot(landType);
     }
 }

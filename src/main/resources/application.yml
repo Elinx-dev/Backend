@@ -43,7 +43,7 @@ slate:
     # Officer login OTP and Aadhaar party-consent OTP are two different things.
     # In the local demo both are served by deterministic mock connectors.
     officer-demo-otp: ${SLATE_OFFICER_OTP:123456}
-    aadhaar-demo-otp: ${SLATE_AADHAAR_OTP:654321}
+    aadhaar-demo-otp: ${SLATE_AADHAAR_OTP:123456}
     validity-seconds: 300
   password-reset:
     validity-minutes: ${SLATE_PASSWORD_RESET_MINUTES:15}

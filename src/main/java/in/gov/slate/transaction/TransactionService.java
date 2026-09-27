@@ -50,7 +50,12 @@ public class TransactionService {
     }
 
     public record CreateRequest(@NotBlank String propertyRef, @NotBlank String deedTypeCode,
-                                String subtype, String transferScope, String sroCode, String remarks) {
+                                String subtype, String transferScope, String sroCode, String remarks,
+                                BigDecimal declaredConsideration, String modeOfConsideration,
+                                BigDecimal extentOrShareTransferred, String extentUnit,
+                                String relationshipCategory, String basisOfSettlement,
+                                BigDecimal shareBeingReleased, Integer resultingSubparcelCount,
+                                BigDecimal guidelineValue, String guidelineValueReference) {
     }
 
     public record DetailsRequest(BigDecimal declaredConsideration, String modeOfConsideration,
@@ -102,16 +107,32 @@ public class TransactionService {
                 .addValue("surveyRequired", surveyRequired)
                 .addValue("sroCode", req.sroCode() != null ? req.sroCode() : property.get("sro_code"))
                 .addValue("remarks", req.remarks())
+                .addValue("declaredConsideration", req.declaredConsideration())
+                .addValue("modeOfConsideration", req.modeOfConsideration())
+                .addValue("extentOrShareTransferred", req.extentOrShareTransferred())
+                .addValue("extentUnit", req.extentUnit())
+                .addValue("relationshipCategory", req.relationshipCategory())
+                .addValue("basisOfSettlement", req.basisOfSettlement())
+                .addValue("shareBeingReleased", req.shareBeingReleased())
+                .addValue("resultingSubparcelCount", req.resultingSubparcelCount())
+                .addValue("guidelineValue", req.guidelineValue())
+                .addValue("guidelineValueReference", req.guidelineValueReference())
                 .addValue("idempotencyKey", UUID.randomUUID())
                 .addValue("initiatedBy", user.id());
 
         jdbc.update("""
                 INSERT INTO core.transaction (state_code, txn_ref, property_id, deed_type_code, subtype,
                     workflow_id, config_version, transfer_scope, survey_required, status, current_stage_code,
-                    sro_code, remarks, idempotency_key, initiated_by)
+                    sro_code, remarks, declared_consideration, mode_of_consideration,
+                    extent_or_share_transferred, extent_unit, relationship_category, basis_of_settlement,
+                    share_being_released, resulting_subparcel_count, guideline_value,
+                    guideline_value_reference, idempotency_key, initiated_by)
                 VALUES (:stateCode, :txnRef, :propertyId, :deedTypeCode, :subtype,
                     :workflowId, :configVersion, :transferScope, :surveyRequired, 'DRAFT', 'PROPERTY_IDENTIFICATION',
-                    :sroCode, :remarks, :idempotencyKey, :initiatedBy)
+                    :sroCode, :remarks, :declaredConsideration, :modeOfConsideration,
+                    :extentOrShareTransferred, :extentUnit, :relationshipCategory, :basisOfSettlement,
+                    :shareBeingReleased, :resultingSubparcelCount, :guidelineValue,
+                    :guidelineValueReference, :idempotencyKey, :initiatedBy)
                 """, params);
 
         audit.record("TRANSACTION_CREATED", "TRANSACTION", txnRef, txnRef, (String) property.get("property_ref"),

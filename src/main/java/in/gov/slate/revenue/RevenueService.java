@@ -1,5 +1,6 @@
 package in.gov.slate.revenue;
 
+import java.sql.Types;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -16,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import in.gov.slate.common.ApiException;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
+import in.gov.slate.common.RevenueLandContext;
 import in.gov.slate.connectors.RevenueConnector;
 import in.gov.slate.connectors.model.RevenueModels.MutationPushRequest;
 import in.gov.slate.connectors.model.RevenueModels.MutationPushResponse;
@@ -213,7 +215,7 @@ public class RevenueService {
                 INSERT INTO revenue.current_state (property_id, revenue_record_ref, revenue_survey_no,
                     revenue_subdivision_no, land_context, owners, extent_value, extent_unit, classification,
                     record_status, source_reference)
-                SELECT p.id, :recordNumber, p.survey_no, p.subdivision_no, p.land_type_code,
+                SELECT p.id, :recordNumber, p.survey_no, p.subdivision_no, :landContext,
                        m.proposed_owner_set, p.extent_value, p.extent_unit, p.classification_code, 'ACTIVE',
                        :sourceRef
                   FROM revenue.proposed_mutation m JOIN core.property p ON p.id = m.property_id
@@ -221,6 +223,8 @@ public class RevenueService {
                 """, new MapSqlParameterSource()
                 .addValue("id", mutationId)
                 .addValue("recordNumber", pushed.revenueRecordRef())
+                .addValue("landContext", RevenueLandContext.forLegacySnapshot(
+                        ctx.property().get("land_type_code")), Types.VARCHAR)
                 .addValue("sourceRef", pushed.mutationNumber()));
 
         String status = workflow.apply(ctx, "TAHSILDAR_APPROVE", req.remarks(), user);

@@ -66,7 +66,7 @@ public class FeeService {
                 .addValue("village", property.get("village_code"))
                 .addValue("landType", property.get("land_type_code")));
         if (rows.isEmpty()) {
-            throw ApiException.notFound("Guideline value for village " + property.get("village_code"));
+            return propertyGuidelineValue(ctx);
         }
         Map<String, Object> rate = rows.get(0);
         BigDecimal ratePerUnit = new BigDecimal(rate.get("rate_per_unit").toString());
@@ -80,6 +80,24 @@ public class FeeService {
         out.put("notificationReference", rate.get("notification_reference"));
         out.put("extentConsidered", extent);
         out.put("guidelineValue", amount);
+        return out;
+    }
+
+    private Map<String, Object> propertyGuidelineValue(TransactionContext ctx) {
+        Map<String, Object> property = ctx.property();
+        BigDecimal ratePerUnit = decimal(property.get("guideline_value"));
+        if (ratePerUnit == null || ratePerUnit.signum() <= 0) {
+            throw ApiException.notFound("Guideline value for village " + property.get("village_code"));
+        }
+
+        BigDecimal extent = transferredExtent(ctx);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("ratePerUnit", ratePerUnit);
+        out.put("unit", property.get("extent_unit"));
+        out.put("zone", property.get("street"));
+        out.put("notificationReference", property.get("guideline_value_reference"));
+        out.put("extentConsidered", extent);
+        out.put("guidelineValue", ratePerUnit.multiply(extent).setScale(2, RoundingMode.HALF_UP));
         return out;
     }
 
