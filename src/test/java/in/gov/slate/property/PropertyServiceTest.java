@@ -66,6 +66,26 @@ class PropertyServiceTest {
                 "relation_type", "PARENT",
                 "property_ref", "TN-CHENNAI-00000001",
                 "token_ref", "SLATE-TN-00000001");
+        Map<String, Object> measurement = Map.of(
+            "seq", 1,
+            "from_point", "NORTH",
+            "to_point", "NORTH_EAST",
+            "value", 125.5,
+            "unit", "SQ_FT");
+        Map<String, Object> history = Map.of(
+            "id", 21L,
+            "seq", 1,
+            "nature_of_transaction", "SALE_FULL",
+            "property_value", 2500000,
+            "registration_fee", 100000,
+            "registering_office", "Adyar SRO");
+        Map<String, Object> priorOwner = Map.of(
+            "seq", 1,
+            "owner_name", "Prior Owner",
+            "address", "Chennai",
+            "aadhaar_number", "123456789012",
+            "pan", "ABCDE1234F",
+            "share_pct", 100);
 
         when(jdbc.queryForList(anyString(), any(SqlParameterSource.class))).thenAnswer(invocation -> {
             String sql = invocation.getArgument(0);
@@ -81,6 +101,15 @@ class PropertyServiceTest {
             if (sql.contains("relation_type, property_ref")) {
                 return List.of(relation);
             }
+            if (sql.contains("FROM core.property_measurement")) {
+                return List.of(measurement);
+            }
+            if (sql.contains("FROM core.chain_of_title_owner")) {
+                return List.of(priorOwner);
+            }
+            if (sql.contains("SELECT id, seq, executor_name")) {
+                return List.of(history);
+            }
             return List.of();
         });
 
@@ -88,5 +117,14 @@ class PropertyServiceTest {
 
         assertThat(result.get("transactions")).isEqualTo(List.of(transaction));
         assertThat(result.get("propertyRelations")).isEqualTo(List.of(relation));
+        assertThat(result.get("boundaryMeasurements")).isEqualTo(List.of(measurement));
+        assertThat(result.get("chainOfTitle")).isEqualTo(List.of(Map.of(
+            "id", 21L,
+            "seq", 1,
+            "nature_of_transaction", "SALE_FULL",
+            "property_value", 2500000,
+            "registration_fee", 100000,
+            "registering_office", "Adyar SRO",
+            "owners", List.of(priorOwner))));
     }
 }

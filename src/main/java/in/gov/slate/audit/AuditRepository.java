@@ -86,6 +86,14 @@ public class AuditRepository {
         return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }
 
+        public Optional<Map<String, Object>> findVisibleById(long id, AuditFilter filter, String stateCode) {
+                Where where = where(filter, stateCode);
+                List<Map<String, Object>> rows = jdbc.queryForList("SELECT " + COLUMNS
+                                + " FROM sec.audit_log a WHERE a.id = :id AND " + where.clause(),
+                                where.params().addValue("id", id));
+                return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
+        }
+
     /** Distinct values for the audit trail filter controls. */
     public Map<String, Object> facets(String stateCode) {
         var params = new MapSqlParameterSource("stateCode", stateCode);
@@ -114,6 +122,44 @@ public class AuditRepository {
         var params = new MapSqlParameterSource();
         clauses.add("a.state_code = :stateCode");
         params.addValue("stateCode", stateCode);
+                clauses.add(CATEGORY + " IN ('TRANSACTION','PROPERTY','APPROVAL','CONFIGURATION')");
+                clauses.add("upper(a.entity_type) <> 'API'");
+                if (!filter.stateWide() && filter.visibleUserId() != null) {
+                        List<String> associations = new ArrayList<>();
+                        associations.add("a.actor_user_id = :visibleUserId");
+                        params.addValue("visibleUserId", filter.visibleUserId());
+
+                        List<String> transactionAssignments = new ArrayList<>();
+                        transactionAssignments.add("t.initiated_by = :visibleUserId");
+                        if (!filter.visibleSroCodes().isEmpty()) {
+                                transactionAssignments.add("t.sro_code IN (:visibleSroCodes)");
+                                params.addValue("visibleSroCodes", filter.visibleSroCodes());
+                        }
+                        if (!filter.visibleVillageCodes().isEmpty()) {
+                                transactionAssignments.add("p.village_code IN (:visibleVillageCodes)");
+                                params.addValue("visibleVillageCodes", filter.visibleVillageCodes());
+                        }
+                        associations.add("EXISTS (SELECT 1 FROM core.transaction t"
+                                        + " JOIN core.property p ON p.id = t.property_id"
+                                        + " WHERE t.state_code = a.state_code"
+                                        + " AND t.txn_ref = a.transaction_ref AND ("
+                                        + String.join(" OR ", transactionAssignments) + "))");
+
+                        List<String> propertyAssignments = new ArrayList<>();
+                        propertyAssignments.add("p.created_by = :visibleUserId OR p.updated_by = :visibleUserId");
+                        if (!filter.visibleSroCodes().isEmpty()) {
+                                propertyAssignments.add("p.sro_code IN (:visibleSroCodes)");
+                                params.addValue("visibleSroCodes", filter.visibleSroCodes());
+                        }
+                        if (!filter.visibleVillageCodes().isEmpty()) {
+                                propertyAssignments.add("p.village_code IN (:visibleVillageCodes)");
+                                params.addValue("visibleVillageCodes", filter.visibleVillageCodes());
+                        }
+                        associations.add("EXISTS (SELECT 1 FROM core.property p"
+                                        + " WHERE p.state_code = a.state_code AND p.property_ref = a.property_ref"
+                                        + " AND (" + String.join(" OR ", propertyAssignments) + "))");
+                        clauses.add("(" + String.join(" OR ", associations) + ")");
+                }
         add(clauses, params, filter.from(), "a.occurred_at >= :from", "from");
         add(clauses, params, filter.to(), "a.occurred_at < :to", "to");
         add(clauses, params, filter.actorUserId(), "a.actor_user_id = :actorUserId", "actorUserId");

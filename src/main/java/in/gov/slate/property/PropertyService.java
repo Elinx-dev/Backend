@@ -1,9 +1,12 @@
 package in.gov.slate.property;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -14,9 +17,15 @@ import in.gov.slate.common.ApiException;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.common.NumberingService;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 
 /**
  * Property entry creates a property reference and nothing else: no token, no
@@ -24,6 +33,10 @@ import jakarta.validation.constraints.Positive;
  */
 @Service
 public class PropertyService {
+
+  private static final int MAX_BOUNDARY_MEASUREMENTS = 8;
+  private static final Set<String> BOUNDARY_POINTS = Set.of("NORTH", "SOUTH", "EAST", "WEST",
+      "NORTH_EAST", "NORTH_WEST", "SOUTH_EAST", "SOUTH_WEST");
 
     private final NamedParameterJdbcTemplate jdbc;
     private final NumberingService numbering;
@@ -38,6 +51,31 @@ public class PropertyService {
     public record OwnerInput(@NotBlank String ownerName, String aadhaarNumber, String pan, String address,
                              BigDecimal sharePct, String shareNote) {
     }
+
+        public record BoundaryMeasurementInput(
+          @NotBlank @Pattern(regexp = "NORTH|SOUTH|EAST|WEST|NORTH_EAST|NORTH_WEST|SOUTH_EAST|SOUTH_WEST") String fromPoint,
+          @NotBlank @Pattern(regexp = "NORTH|SOUTH|EAST|WEST|NORTH_EAST|NORTH_WEST|SOUTH_EAST|SOUTH_WEST") String toPoint,
+          @NotNull @DecimalMin(value = "0", inclusive = false) BigDecimal value,
+          @NotBlank String unit) {
+        }
+
+            public record PreviousOwnerInput(
+              @NotBlank String ownerName,
+              @NotBlank String address,
+              @NotBlank @Pattern(regexp = "\\d{12}") String aadhaarNumber,
+              @NotBlank @Pattern(regexp = "[A-Z]{5}[0-9]{4}[A-Z]") String pan,
+              @NotNull @DecimalMin("0") @DecimalMax("100") BigDecimal sharePct) {
+            }
+
+            public record ChainOfTitleInput(
+              @NotNull LocalDate transactionDate,
+              @NotBlank String natureOfTransaction,
+              String referenceNo,
+              @NotNull @Positive BigDecimal propertyValue,
+              @NotNull @DecimalMin("0") BigDecimal registrationFee,
+              @NotBlank String registeringOffice,
+              @NotEmpty @Valid List<PreviousOwnerInput> owners) {
+            }
 
     public record CreatePropertyRequest(
             String ulpin,
@@ -67,7 +105,9 @@ public class PropertyService {
             String guidelineValueReference,
             Boolean isApartmentUnit,
             ApartmentDetail apartmentDetail,
-            List<OwnerInput> owners) {
+            List<OwnerInput> owners,
+            @NotEmpty @Size(max = MAX_BOUNDARY_MEASUREMENTS) @Valid List<BoundaryMeasurementInput> boundaryMeasurements,
+            @Valid List<ChainOfTitleInput> chainOfTitle) {
     }
 
     public record ApartmentDetail(Long parentLandPropertyId, String flatNo, String blockTower, String floor,
@@ -79,6 +119,8 @@ public class PropertyService {
     public Map<String, Object> create(CreatePropertyRequest req) {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("PROPERTY_CREATE");
+        validateBoundaryMeasurements(req.boundaryMeasurements());
+        validateChainOfTitle(req.chainOfTitle());
         String propertyRef = numbering.next(user.stateCode(), "PROPERTY_REF", req.districtCode());
 
         var params = new MapSqlParameterSource()
@@ -165,6 +207,56 @@ public class PropertyService {
             }
         }
 
+          for (int index = 0; index < req.boundaryMeasurements().size(); index++) {
+            BoundaryMeasurementInput measurement = req.boundaryMeasurements().get(index);
+            jdbc.update("""
+                INSERT INTO core.property_measurement (property_id, seq, from_point, to_point, value, unit)
+                VALUES (:propertyId, :seq, :fromPoint, :toPoint, :value, :unit)
+                """, new MapSqlParameterSource()
+                .addValue("propertyId", id)
+                .addValue("seq", index + 1)
+                .addValue("fromPoint", measurement.fromPoint())
+                .addValue("toPoint", measurement.toPoint())
+                .addValue("value", measurement.value())
+                .addValue("unit", measurement.unit()));
+          }
+
+          if (req.chainOfTitle() != null) {
+            for (int historyIndex = 0; historyIndex < req.chainOfTitle().size(); historyIndex++) {
+              ChainOfTitleInput history = req.chainOfTitle().get(historyIndex);
+              Long historyId = jdbc.queryForObject("""
+                  INSERT INTO core.chain_of_title (property_id, seq, transaction_date, nature_of_transaction,
+                    reference_no, property_value, registration_fee, registering_office)
+                  VALUES (:propertyId, :seq, :transactionDate, :natureOfTransaction,
+                    :referenceNo, :propertyValue, :registrationFee, :registeringOffice)
+                  RETURNING id
+                  """, new MapSqlParameterSource()
+                  .addValue("propertyId", id)
+                  .addValue("seq", historyIndex + 1)
+                  .addValue("transactionDate", history.transactionDate())
+                  .addValue("natureOfTransaction", history.natureOfTransaction())
+                  .addValue("referenceNo", history.referenceNo())
+                  .addValue("propertyValue", history.propertyValue())
+                  .addValue("registrationFee", history.registrationFee())
+                  .addValue("registeringOffice", history.registeringOffice()), Long.class);
+              for (int ownerIndex = 0; ownerIndex < history.owners().size(); ownerIndex++) {
+                PreviousOwnerInput owner = history.owners().get(ownerIndex);
+                jdbc.update("""
+                    INSERT INTO core.chain_of_title_owner (chain_of_title_id, seq, owner_name, address,
+                      aadhaar_number, pan, share_pct)
+                    VALUES (:historyId, :seq, :ownerName, :address, :aadhaarNumber, :pan, :sharePct)
+                    """, new MapSqlParameterSource()
+                    .addValue("historyId", historyId)
+                    .addValue("seq", ownerIndex + 1)
+                    .addValue("ownerName", owner.ownerName())
+                    .addValue("address", owner.address())
+                    .addValue("aadhaarNumber", owner.aadhaarNumber())
+                    .addValue("pan", owner.pan())
+                    .addValue("sharePct", owner.sharePct()));
+              }
+            }
+          }
+
         audit.record("PROPERTY_CREATED", "PROPERTY", String.valueOf(id), null, propertyRef,
                 Map.of("propertyRef", propertyRef, "surveyNo", req.surveyNo()), null);
         return get(propertyRef);
@@ -189,15 +281,34 @@ public class PropertyService {
                   FROM core.property_owner WHERE property_id = :propertyId AND effective_to IS NULL
                  ORDER BY id
                 """, idParam));
+              property.put("boundaryMeasurements", jdbc.queryForList("""
+                SELECT seq, from_point, to_point, value, unit
+                  FROM core.property_measurement
+                 WHERE property_id = :propertyId
+                 ORDER BY seq
+                """, idParam));
         property.put("revenueOwners", jdbc.queryForList("""
                 SELECT revenue_record_ref, owners, extent_value, extent_unit, fetched_at
                   FROM revenue.current_state WHERE property_id = :propertyId
                  ORDER BY fetched_at DESC LIMIT 1
                 """, idParam));
-        property.put("chainOfTitle", jdbc.queryForList("""
-                SELECT seq, executor_name, claimant_name, transaction_date, nature_of_transaction, reference_no
-                  FROM core.chain_of_title WHERE property_id = :propertyId ORDER BY seq
-                """, idParam));
+        List<Map<String, Object>> chainRows = jdbc.queryForList("""
+          SELECT id, seq, executor_name, claimant_name, transaction_date, nature_of_transaction,
+                 reference_no, property_value, registration_fee, registering_office
+            FROM core.chain_of_title WHERE property_id = :propertyId ORDER BY seq
+          """, idParam);
+        List<Map<String, Object>> chainOfTitle = new ArrayList<>();
+        for (Map<String, Object> chainRow : chainRows) {
+          Map<String, Object> history = new LinkedHashMap<>(chainRow);
+            history.put("owners", jdbc.queryForList("""
+              SELECT seq, owner_name, address, aadhaar_number, pan, share_pct
+                FROM core.chain_of_title_owner
+               WHERE chain_of_title_id = :historyId
+               ORDER BY seq
+              """, new MapSqlParameterSource("historyId", history.get("id"))));
+                chainOfTitle.add(history);
+        }
+        property.put("chainOfTitle", chainOfTitle);
         property.put("transactions", transactionHistory(id));
         property.put("propertyRelations", propertyRelations(id));
         if (Boolean.TRUE.equals(property.get("is_apartment_unit"))) {
@@ -206,6 +317,43 @@ public class PropertyService {
         }
         return property;
     }
+
+      private void validateBoundaryMeasurements(List<BoundaryMeasurementInput> measurements) {
+        if (measurements == null || measurements.isEmpty()) {
+          throw ApiException.badRequest("At least one boundary measurement is required");
+        }
+        if (measurements.size() > MAX_BOUNDARY_MEASUREMENTS) {
+          throw ApiException.badRequest("No more than " + MAX_BOUNDARY_MEASUREMENTS
+              + " boundary measurements may be provided");
+        }
+        for (BoundaryMeasurementInput measurement : measurements) {
+          if (measurement == null || measurement.fromPoint() == null || measurement.toPoint() == null
+              || measurement.value() == null || measurement.unit() == null || measurement.unit().isBlank()) {
+            throw ApiException.badRequest("Boundary measurements require From, To, extent, and unit values");
+          }
+          if (!BOUNDARY_POINTS.contains(measurement.fromPoint()) || !BOUNDARY_POINTS.contains(measurement.toPoint())) {
+            throw ApiException.badRequest("Boundary measurement points must be compass directions");
+          }
+          if (measurement.value().signum() <= 0) {
+            throw ApiException.badRequest("Boundary measurement extent must be greater than zero");
+          }
+          if (measurement.fromPoint().equals(measurement.toPoint())) {
+            throw ApiException.badRequest("Boundary measurement From and To points must differ");
+          }
+        }
+      }
+
+        private void validateChainOfTitle(List<ChainOfTitleInput> entries) {
+          if (entries == null) {
+            return;
+          }
+          for (ChainOfTitleInput entry : entries) {
+            if (entry == null || entry.owners() == null || entry.owners().isEmpty()
+                || entry.owners().stream().anyMatch(owner -> owner == null)) {
+              throw ApiException.badRequest("Each chain-of-title record must include at least one previous owner");
+            }
+          }
+        }
 
     private List<Map<String, Object>> transactionHistory(long propertyId) {
         return jdbc.queryForList("""
@@ -419,9 +567,19 @@ public class PropertyService {
         return jdbc.queryForList("""
                 SELECT p.id, p.property_ref, p.ulpin, p.property_type_code, p.survey_no, p.subdivision_no,
                        p.extent_value, p.extent_unit, p.village_code, p.district_code, p.sro_code, p.status,
-                       t.token_ref
+                       t.token_ref, latest_registration.registered_at AS latest_registered_at
                   FROM core.property p
                   LEFT JOIN chain.token t ON t.id = p.token_id
+                  LEFT JOIN LATERAL (
+                      SELECT COALESCE(rr.registration_date::timestamp, tx.registered_at) AS registered_at
+                        FROM core.transaction tx
+                        LEFT JOIN core.registration_result rr ON rr.transaction_id = tx.id
+                       WHERE tx.property_id = p.id
+                         AND (rr.registration_date IS NOT NULL OR tx.registered_at IS NOT NULL)
+                       ORDER BY COALESCE(rr.registration_date::timestamp, tx.registered_at) DESC,
+                                tx.id DESC
+                       LIMIT 1
+                  ) latest_registration ON TRUE
                  WHERE p.state_code = :stateCode
                    AND (CAST(:query AS text) IS NULL OR p.property_ref ILIKE '%'||:query||'%'
                         OR coalesce(p.ulpin,'') ILIKE '%'||:query||'%'
@@ -429,7 +587,7 @@ public class PropertyService {
                         OR coalesce(p.door_no,'') ILIKE '%'||:query||'%')
                    AND (CAST(:villageCode AS text) IS NULL OR p.village_code = :villageCode)
                    AND (CAST(:surveyNo AS text) IS NULL OR p.survey_no = :surveyNo)
-                 ORDER BY p.property_ref
+                 ORDER BY latest_registration.registered_at DESC NULLS LAST, p.property_ref
                  LIMIT :limit
                 """, new MapSqlParameterSource()
                 .addValue("stateCode", user.stateCode())

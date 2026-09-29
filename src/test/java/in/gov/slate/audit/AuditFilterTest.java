@@ -78,6 +78,8 @@ class AuditFilterTest {
     @Test
     void rejectsUnsupportedFilterValues() {
         assertThrows(ApiException.class, () -> AuditFilter.builder().category("EVERYTHING").build());
+        assertThrows(ApiException.class, () -> AuditFilter.builder().category("SECURITY").build());
+        assertThrows(ApiException.class, () -> AuditFilter.builder().category("NAVIGATION").build());
         assertThrows(ApiException.class, () -> AuditFilter.builder().decision("MAYBE").build());
         assertThrows(ApiException.class, () -> AuditFilter.builder().outcome("PARTIAL").build());
         assertThrows(ApiException.class, () -> AuditFilter.builder().actorUserId(0L).build());

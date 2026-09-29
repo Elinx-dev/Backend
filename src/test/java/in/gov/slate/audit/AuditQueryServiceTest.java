@@ -52,27 +52,30 @@ class AuditQueryServiceTest {
         assertEquals("STATE", response.get("scope"));
         assertEquals(120L, response.get("total"));
         assertEquals(3, response.get("totalPages"));
-        assertEquals(null, captureFilter().actorUsername());
+        AuditFilter filter = captureFilter();
+        assertEquals(null, filter.actorUsername());
+        assertTrue(filter.stateWide());
     }
 
     @Test
-    void anOfficerIsRestrictedToTheirOwnActions() {
+    void anOfficerSeesActionsRelatedToTheirAssignedTransactions() {
         authenticate(officer());
         when(repository.search(any(), eq("TN"))).thenReturn(List.of());
         when(repository.count(any(), eq("TN"))).thenReturn(0L);
 
-        Map<String, Object> response = service().search(AuditFilter.builder().actorUsername("someone.else"));
+        Map<String, Object> response = service().search(AuditFilter.builder());
 
-        assertEquals("SELF", response.get("scope"));
+        assertEquals("RELATED", response.get("scope"));
         AuditFilter filter = captureFilter();
-        assertEquals("ro.adyar", filter.actorUsername());
-        assertEquals(1L, filter.actorUserId());
+        assertEquals(1L, filter.visibleUserId());
+        assertEquals(List.of("ADYAR"), filter.visibleSroCodes());
+        assertEquals(false, filter.stateWide());
     }
 
     @Test
-    void anOfficerMayNotOpenAnotherUsersEntry() {
+    void anOfficerCannotOpenAnUnrelatedEntry() {
         authenticate(officer());
-        when(repository.findById(9L, "TN")).thenReturn(Optional.of(Map.of("id", 9L, "actor_user_id", 42L)));
+        when(repository.findVisibleById(eq(9L), any(), eq("TN"))).thenReturn(Optional.empty());
 
         assertThrows(ApiException.class, () -> service().entry(9L));
     }
@@ -80,7 +83,7 @@ class AuditQueryServiceTest {
     @Test
     void aMissingEntryIsNotFound() {
         authenticate(officer());
-        when(repository.findById(9L, "TN")).thenReturn(Optional.empty());
+        when(repository.findVisibleById(eq(9L), any(), eq("TN"))).thenReturn(Optional.empty());
 
         assertThrows(ApiException.class, () -> service().entry(9L));
     }

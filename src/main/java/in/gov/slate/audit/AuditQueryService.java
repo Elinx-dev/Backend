@@ -13,8 +13,8 @@ import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 
 /**
- * Serves the audit trail. A state administrator sees every action taken in the
- * state; anyone else sees only their own, and only ever within their own state.
+ * Serves application-change events. Administrators see their whole state;
+ * other users see their own actions and changes to transactions assigned to them.
  */
 @Service
 public class AuditQueryService {
@@ -58,11 +58,9 @@ public class AuditQueryService {
 
     public Map<String, Object> entry(long id) {
         CurrentUser user = CurrentUser.require();
-        Map<String, Object> row = repository.findById(id, user.stateCode())
+        Map<String, Object> row = repository.findVisibleById(id, AuditFilter.builder().scope(user).build(),
+            user.stateCode())
                 .orElseThrow(() -> ApiException.notFound("Audit entry " + id));
-        if (!user.hasRole(SUPERVISOR_ROLE) && !Long.valueOf(user.id()).equals(actorId(row))) {
-            throw ApiException.forbidden("You may only read your own audit entries");
-        }
         return row;
     }
 
@@ -76,6 +74,7 @@ public class AuditQueryService {
                 .transactionRef(transactionRef)
                 .propertyRef(propertyRef)
                 .size(size == null ? 100 : size)
+                .scope(user)
                 .build();
         return repository.search(filter, user.stateCode());
     }
@@ -113,19 +112,11 @@ public class AuditQueryService {
     }
 
     private AuditFilter scoped(AuditFilter.Builder request, CurrentUser user) {
-        if (!user.hasRole(SUPERVISOR_ROLE)) {
-            request.actorUserId(user.id()).actorUsername(user.username());
-        }
-        return request.build();
+        return request.scope(user).build();
     }
 
     private String scopeOf(CurrentUser user) {
-        return user.hasRole(SUPERVISOR_ROLE) ? "STATE" : "SELF";
-    }
-
-    private Long actorId(Map<String, Object> row) {
-        Object value = row.get("actor_user_id");
-        return value instanceof Number number ? number.longValue() : null;
+        return user.hasRole(SUPERVISOR_ROLE) ? "STATE" : "RELATED";
     }
 
     private String quote(Object value) {

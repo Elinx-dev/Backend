@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 import in.gov.slate.common.ApiException;
+import in.gov.slate.common.CurrentUser;
 
 /**
  * A validated audit trail query. Every value the caller sends is checked and
@@ -19,7 +20,9 @@ import in.gov.slate.common.ApiException;
 public record AuditFilter(OffsetDateTime from, OffsetDateTime to, Long actorUserId, String actorUsername,
                           String action, String category, String entityType, String entityId,
                           String transactionRef, String propertyRef, String outcome, String decision,
-                          String search, String sort, boolean descending, int page, int size) {
+                          String search, String sort, boolean descending, int page, int size,
+                          Long visibleUserId, List<String> visibleSroCodes, List<String> visibleVillageCodes,
+                          boolean stateWide) {
 
     public static final int MAX_PAGE_SIZE = 200;
     public static final int MAX_RANGE_DAYS = 400;
@@ -28,8 +31,7 @@ public record AuditFilter(OffsetDateTime from, OffsetDateTime to, Long actorUser
     private static final Pattern REF = Pattern.compile("[A-Za-z0-9_/-]{1,64}");
     private static final Set<String> OUTCOMES = Set.of("SUCCESS", "FAILURE");
     private static final Set<String> DECISIONS = Set.of("APPROVED", "REJECTED");
-    private static final Set<String> CATEGORIES = Set.of("TRANSACTION", "PROPERTY", "APPROVAL", "SECURITY",
-            "CONFIGURATION", "NAVIGATION", "SYSTEM");
+    private static final Set<String> CATEGORIES = Set.of("TRANSACTION", "PROPERTY", "APPROVAL", "CONFIGURATION");
     private static final List<String> SORTS = List.of("occurred_at", "action", "actor_username", "entity_type",
             "category", "outcome");
 
@@ -60,6 +62,7 @@ public record AuditFilter(OffsetDateTime from, OffsetDateTime to, Long actorUser
         private String direction;
         private Integer page;
         private Integer size;
+        private CurrentUser visibilityUser;
 
         public Builder from(String value) {
             this.from = value;
@@ -146,6 +149,11 @@ public record AuditFilter(OffsetDateTime from, OffsetDateTime to, Long actorUser
             return this;
         }
 
+        public Builder scope(CurrentUser user) {
+            this.visibilityUser = user;
+            return this;
+        }
+
         public AuditFilter build() {
             OffsetDateTime parsedFrom = timestamp("from", from, false);
             OffsetDateTime parsedTo = timestamp("to", to, true);
@@ -187,7 +195,11 @@ public record AuditFilter(OffsetDateTime from, OffsetDateTime to, Long actorUser
                     member("outcome", upper(blankToNull(outcome)), OUTCOMES),
                     member("decision", upper(blankToNull(decision)), DECISIONS),
                     text("search", search, 120),
-                    resolvedSort, resolvedDirection.equals("desc"), resolvedPage, resolvedSize);
+                    resolvedSort, resolvedDirection.equals("desc"), resolvedPage, resolvedSize,
+                    visibilityUser == null ? null : visibilityUser.id(),
+                    visibilityUser == null ? List.of() : List.copyOf(visibilityUser.sroCodes()),
+                    visibilityUser == null ? List.of() : List.copyOf(visibilityUser.villageCodes()),
+                    visibilityUser != null && visibilityUser.hasRole("STATE_ADMIN"));
         }
 
         private OffsetDateTime timestamp(String field, String value, boolean endOfDay) {
