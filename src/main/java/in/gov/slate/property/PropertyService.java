@@ -18,7 +18,6 @@ import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.common.NumberingService;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
@@ -59,23 +58,14 @@ public class PropertyService {
           @NotBlank String unit) {
         }
 
-            public record PreviousOwnerInput(
-              @NotBlank String ownerName,
-              @NotBlank String address,
-              @NotBlank @Pattern(regexp = "\\d{12}") String aadhaarNumber,
-              @NotBlank @Pattern(regexp = "[A-Z]{5}[0-9]{4}[A-Z]") String pan,
-              @NotNull @DecimalMin("0") @DecimalMax("100") BigDecimal sharePct) {
-            }
-
-            public record ChainOfTitleInput(
-              @NotNull LocalDate transactionDate,
-              @NotBlank String natureOfTransaction,
-              String referenceNo,
-              @NotNull @Positive BigDecimal propertyValue,
-              @NotNull @DecimalMin("0") BigDecimal registrationFee,
-              @NotBlank String registeringOffice,
-              @NotEmpty @Valid List<PreviousOwnerInput> owners) {
-            }
+        public record ChainOfTitleInput(
+          @NotBlank String executorName,
+          @NotBlank String claimantName,
+          @NotNull LocalDate transactionDate,
+          @NotBlank String natureOfTransaction,
+          String referenceNo,
+          @NotBlank String surveyNo) {
+        }
 
     public record CreatePropertyRequest(
             String ulpin,
@@ -207,7 +197,7 @@ public class PropertyService {
             }
         }
 
-          for (int index = 0; index < req.boundaryMeasurements().size(); index++) {
+        for (int index = 0; index < req.boundaryMeasurements().size(); index++) {
             BoundaryMeasurementInput measurement = req.boundaryMeasurements().get(index);
             jdbc.update("""
                 INSERT INTO core.property_measurement (property_id, seq, from_point, to_point, value, unit)
@@ -224,36 +214,21 @@ public class PropertyService {
           if (req.chainOfTitle() != null) {
             for (int historyIndex = 0; historyIndex < req.chainOfTitle().size(); historyIndex++) {
               ChainOfTitleInput history = req.chainOfTitle().get(historyIndex);
-              Long historyId = jdbc.queryForObject("""
-                  INSERT INTO core.chain_of_title (property_id, seq, transaction_date, nature_of_transaction,
-                    reference_no, property_value, registration_fee, registering_office)
-                  VALUES (:propertyId, :seq, :transactionDate, :natureOfTransaction,
-                    :referenceNo, :propertyValue, :registrationFee, :registeringOffice)
+              jdbc.queryForObject("""
+                  INSERT INTO core.chain_of_title (property_id, seq, executor_name, claimant_name,
+                    transaction_date, nature_of_transaction, reference_no, survey_no)
+                  VALUES (:propertyId, :seq, :executorName, :claimantName,
+                    :transactionDate, :natureOfTransaction, :referenceNo, :surveyNo)
                   RETURNING id
                   """, new MapSqlParameterSource()
                   .addValue("propertyId", id)
                   .addValue("seq", historyIndex + 1)
+                  .addValue("executorName", history.executorName().trim())
+                  .addValue("claimantName", history.claimantName().trim())
                   .addValue("transactionDate", history.transactionDate())
                   .addValue("natureOfTransaction", history.natureOfTransaction())
-                  .addValue("referenceNo", history.referenceNo())
-                  .addValue("propertyValue", history.propertyValue())
-                  .addValue("registrationFee", history.registrationFee())
-                  .addValue("registeringOffice", history.registeringOffice()), Long.class);
-              for (int ownerIndex = 0; ownerIndex < history.owners().size(); ownerIndex++) {
-                PreviousOwnerInput owner = history.owners().get(ownerIndex);
-                jdbc.update("""
-                    INSERT INTO core.chain_of_title_owner (chain_of_title_id, seq, owner_name, address,
-                      aadhaar_number, pan, share_pct)
-                    VALUES (:historyId, :seq, :ownerName, :address, :aadhaarNumber, :pan, :sharePct)
-                    """, new MapSqlParameterSource()
-                    .addValue("historyId", historyId)
-                    .addValue("seq", ownerIndex + 1)
-                    .addValue("ownerName", owner.ownerName())
-                    .addValue("address", owner.address())
-                    .addValue("aadhaarNumber", owner.aadhaarNumber())
-                    .addValue("pan", owner.pan())
-                    .addValue("sharePct", owner.sharePct()));
-              }
+                  .addValue("referenceNo", blankToNull(history.referenceNo()))
+                  .addValue("surveyNo", history.surveyNo().trim()), Long.class);
             }
           }
 
@@ -294,19 +269,12 @@ public class PropertyService {
                 """, idParam));
         List<Map<String, Object>> chainRows = jdbc.queryForList("""
           SELECT id, seq, executor_name, claimant_name, transaction_date, nature_of_transaction,
-                 reference_no, property_value, registration_fee, registering_office
+                 reference_no, survey_no
             FROM core.chain_of_title WHERE property_id = :propertyId ORDER BY seq
           """, idParam);
         List<Map<String, Object>> chainOfTitle = new ArrayList<>();
         for (Map<String, Object> chainRow : chainRows) {
-          Map<String, Object> history = new LinkedHashMap<>(chainRow);
-            history.put("owners", jdbc.queryForList("""
-              SELECT seq, owner_name, address, aadhaar_number, pan, share_pct
-                FROM core.chain_of_title_owner
-               WHERE chain_of_title_id = :historyId
-               ORDER BY seq
-              """, new MapSqlParameterSource("historyId", history.get("id"))));
-                chainOfTitle.add(history);
+          chainOfTitle.add(new LinkedHashMap<>(chainRow));
         }
         property.put("chainOfTitle", chainOfTitle);
         property.put("transactions", transactionHistory(id));
@@ -348,9 +316,12 @@ public class PropertyService {
             return;
           }
           for (ChainOfTitleInput entry : entries) {
-            if (entry == null || entry.owners() == null || entry.owners().isEmpty()
-                || entry.owners().stream().anyMatch(owner -> owner == null)) {
-              throw ApiException.badRequest("Each chain-of-title record must include at least one previous owner");
+            if (entry == null || entry.executorName() == null || entry.executorName().isBlank()
+                || entry.claimantName() == null || entry.claimantName().isBlank()
+                || entry.transactionDate() == null
+                || entry.natureOfTransaction() == null || entry.natureOfTransaction().isBlank()
+                || entry.surveyNo() == null || entry.surveyNo().isBlank()) {
+              throw ApiException.badRequest("Each chain-of-title record must include executor, claimant, transaction date, nature of transaction, and survey number");
             }
           }
         }

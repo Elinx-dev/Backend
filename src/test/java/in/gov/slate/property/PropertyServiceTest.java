@@ -75,17 +75,12 @@ class PropertyServiceTest {
         Map<String, Object> history = Map.of(
             "id", 21L,
             "seq", 1,
+            "executor_name", "Prior Owner",
+            "claimant_name", "New Owner",
+            "transaction_date", "2024-01-15",
             "nature_of_transaction", "SALE_FULL",
-            "property_value", 2500000,
-            "registration_fee", 100000,
-            "registering_office", "Adyar SRO");
-        Map<String, Object> priorOwner = Map.of(
-            "seq", 1,
-            "owner_name", "Prior Owner",
-            "address", "Chennai",
-            "aadhaar_number", "123456789012",
-            "pan", "ABCDE1234F",
-            "share_pct", 100);
+            "reference_no", "REG-42",
+            "survey_no", "15");
 
         when(jdbc.queryForList(anyString(), any(SqlParameterSource.class))).thenAnswer(invocation -> {
             String sql = invocation.getArgument(0);
@@ -104,9 +99,6 @@ class PropertyServiceTest {
             if (sql.contains("FROM core.property_measurement")) {
                 return List.of(measurement);
             }
-            if (sql.contains("FROM core.chain_of_title_owner")) {
-                return List.of(priorOwner);
-            }
             if (sql.contains("SELECT id, seq, executor_name")) {
                 return List.of(history);
             }
@@ -121,10 +113,11 @@ class PropertyServiceTest {
         assertThat(result.get("chainOfTitle")).isEqualTo(List.of(Map.of(
             "id", 21L,
             "seq", 1,
+            "executor_name", "Prior Owner",
+            "claimant_name", "New Owner",
+            "transaction_date", "2024-01-15",
             "nature_of_transaction", "SALE_FULL",
-            "property_value", 2500000,
-            "registration_fee", 100000,
-            "registering_office", "Adyar SRO",
-            "owners", List.of(priorOwner))));
+            "reference_no", "REG-42",
+            "survey_no", "15")));
     }
 }
