@@ -17,6 +17,7 @@ import in.gov.slate.common.ApiException;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.common.NumberingService;
+import in.gov.slate.location.LocationService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
@@ -40,11 +41,14 @@ public class PropertyService {
     private final NamedParameterJdbcTemplate jdbc;
     private final NumberingService numbering;
     private final AuditService audit;
+    private final LocationService locations;
 
-    public PropertyService(NamedParameterJdbcTemplate jdbc, NumberingService numbering, AuditService audit) {
+    public PropertyService(NamedParameterJdbcTemplate jdbc, NumberingService numbering, AuditService audit,
+                           LocationService locations) {
         this.jdbc = jdbc;
         this.numbering = numbering;
         this.audit = audit;
+        this.locations = locations;
     }
 
     public record OwnerInput(@NotBlank String ownerName, String aadhaarNumber, String pan, String address,
@@ -111,6 +115,8 @@ public class PropertyService {
         user.requirePermission("PROPERTY_CREATE");
         validateBoundaryMeasurements(req.boundaryMeasurements());
         validateChainOfTitle(req.chainOfTitle());
+        locations.requireValidPath(user.stateCode(), req.districtCode(), req.sroCode(),
+                req.talukCode(), req.villageCode());
         String propertyRef = numbering.next(user.stateCode(), "PROPERTY_REF", req.districtCode());
 
         var params = new MapSqlParameterSource()

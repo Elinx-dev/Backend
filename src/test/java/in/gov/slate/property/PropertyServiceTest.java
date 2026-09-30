@@ -23,6 +23,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.common.NumberingService;
+import in.gov.slate.location.LocationService;
 
 @ExtendWith(MockitoExtension.class)
 class PropertyServiceTest {
@@ -33,12 +34,14 @@ class PropertyServiceTest {
     private NumberingService numbering;
     @Mock
     private AuditService audit;
+    @Mock
+    private LocationService locations;
 
     private PropertyService service;
 
     @BeforeEach
     void setUp() {
-        service = new PropertyService(jdbc, numbering, audit);
+        service = new PropertyService(jdbc, numbering, audit, locations);
         CurrentUser user = new CurrentUser(1L, "ro.adyar", "R. Anandhi", "TN", "REGISTRATION",
                 Set.of("REGISTRATION_OFFICER"), Set.of("PROPERTY_READ"), Set.of("ADYAR"), Set.of());
         SecurityContextHolder.getContext().setAuthentication(
