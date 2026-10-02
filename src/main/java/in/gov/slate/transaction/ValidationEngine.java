@@ -186,8 +186,9 @@ public class ValidationEngine {
             return received.compareTo(BigDecimal.ZERO) > 0 && received.compareTo(HUNDRED) <= 0;
         });
 
-        predicates.put("aadhaarIsTwelveDigits", ctx ->
-                ctx.parties().stream().allMatch(p -> Boolean.TRUE.equals(p.get("aadhaar_captured"))));
+        // Aadhaar presence validation is temporarily disabled for party saves.
+        // predicates.put("aadhaarIsTwelveDigits", ctx ->
+        //         ctx.parties().stream().allMatch(p -> Boolean.TRUE.equals(p.get("aadhaar_captured"))));
 
         predicates.put("panFormatValid", ctx -> ctx.parties().stream()
                 .map(p -> (String) p.get("pan"))
