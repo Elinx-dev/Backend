@@ -2,7 +2,7 @@
 --   state -> registration district -> sub-registrar office -> taluk -> revenue village
 -- Each level references its parent by id; codes are unique within the parent.
 
-CREATE TABLE master.registration_district (
+CREATE TABLE IF NOT EXISTS master.registration_district (
   id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   state_code     CHAR(2) NOT NULL REFERENCES cfg.state(state_code),
   district_code  TEXT NOT NULL,
@@ -12,7 +12,7 @@ CREATE TABLE master.registration_district (
   UNIQUE (state_code, district_code)
 );
 
-CREATE TABLE master.sub_registrar_office (
+CREATE TABLE IF NOT EXISTS master.sub_registrar_office (
   id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   district_id  BIGINT NOT NULL REFERENCES master.registration_district(id),
   sro_code     TEXT NOT NULL,
@@ -21,9 +21,9 @@ CREATE TABLE master.sub_registrar_office (
   active       BOOLEAN NOT NULL DEFAULT TRUE,
   UNIQUE (district_id, sro_code)
 );
-CREATE INDEX ix_sro_district ON master.sub_registrar_office (district_id);
+CREATE INDEX IF NOT EXISTS ix_sro_district ON master.sub_registrar_office (district_id);
 
-CREATE TABLE master.taluk (
+CREATE TABLE IF NOT EXISTS master.taluk (
   id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   sro_id      BIGINT NOT NULL REFERENCES master.sub_registrar_office(id),
   taluk_code  TEXT NOT NULL,
@@ -32,9 +32,9 @@ CREATE TABLE master.taluk (
   active      BOOLEAN NOT NULL DEFAULT TRUE,
   UNIQUE (sro_id, taluk_code)
 );
-CREATE INDEX ix_taluk_sro ON master.taluk (sro_id);
+CREATE INDEX IF NOT EXISTS ix_taluk_sro ON master.taluk (sro_id);
 
-CREATE TABLE master.revenue_village (
+CREATE TABLE IF NOT EXISTS master.revenue_village (
   id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   taluk_id      BIGINT NOT NULL REFERENCES master.taluk(id),
   village_code  TEXT NOT NULL,
@@ -43,7 +43,7 @@ CREATE TABLE master.revenue_village (
   active        BOOLEAN NOT NULL DEFAULT TRUE,
   UNIQUE (taluk_id, village_code)
 );
-CREATE INDEX ix_village_taluk ON master.revenue_village (taluk_id);
+CREATE INDEX IF NOT EXISTS ix_village_taluk ON master.revenue_village (taluk_id);
 
 GRANT SELECT, INSERT, UPDATE ON master.registration_district, master.sub_registrar_office,
   master.taluk, master.revenue_village TO slate_app;

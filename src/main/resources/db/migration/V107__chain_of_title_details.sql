@@ -1,9 +1,9 @@
 ALTER TABLE core.chain_of_title
-  ADD COLUMN property_value NUMERIC(18,2),
-  ADD COLUMN registration_fee NUMERIC(18,2),
-  ADD COLUMN registering_office TEXT;
+  ADD COLUMN IF NOT EXISTS property_value NUMERIC(18,2),
+  ADD COLUMN IF NOT EXISTS registration_fee NUMERIC(18,2),
+  ADD COLUMN IF NOT EXISTS registering_office TEXT;
 
-CREATE TABLE core.chain_of_title_owner (
+CREATE TABLE IF NOT EXISTS core.chain_of_title_owner (
   id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   chain_of_title_id  BIGINT NOT NULL REFERENCES core.chain_of_title(id) ON DELETE CASCADE,
   seq                INT NOT NULL,

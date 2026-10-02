@@ -8,8 +8,8 @@ spring:
     name: slate-api
   datasource:
     url: ${SLATE_DB_URL:jdbc:postgresql://localhost:5432/slate}
-    username: ${SLATE_DB_USER:slate}
-    password: ${SLATE_DB_PASSWORD:slate}
+    username: ${SLATE_DB_USER:slate_app}
+    password: ${SLATE_DB_PASSWORD:slate_app}
     hikari:
       maximum-pool-size: 15
   flyway:
