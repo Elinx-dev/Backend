@@ -278,7 +278,7 @@ public class AuthService {
             return "/tahsildar";
         }
         if (roles.contains("STATE_ADMIN")) {
-            return "/admin";
+            return "/admin/dashboard";
         }
         return "/public";
     }
