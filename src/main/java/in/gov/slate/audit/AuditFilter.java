@@ -63,6 +63,7 @@ public record AuditFilter(OffsetDateTime from, OffsetDateTime to, Long actorUser
         private Integer page;
         private Integer size;
         private CurrentUser visibilityUser;
+        private Boolean visibilityStateWide;
 
         public Builder from(String value) {
             this.from = value;
@@ -154,6 +155,12 @@ public record AuditFilter(OffsetDateTime from, OffsetDateTime to, Long actorUser
             return this;
         }
 
+        public Builder scope(CurrentUser user, boolean stateWide) {
+            this.visibilityUser = user;
+            this.visibilityStateWide = stateWide;
+            return this;
+        }
+
         public AuditFilter build() {
             OffsetDateTime parsedFrom = timestamp("from", from, false);
             OffsetDateTime parsedTo = timestamp("to", to, true);
@@ -199,7 +206,8 @@ public record AuditFilter(OffsetDateTime from, OffsetDateTime to, Long actorUser
                     visibilityUser == null ? null : visibilityUser.id(),
                     visibilityUser == null ? List.of() : List.copyOf(visibilityUser.sroCodes()),
                     visibilityUser == null ? List.of() : List.copyOf(visibilityUser.villageCodes()),
-                    visibilityUser != null && visibilityUser.hasRole("STATE_ADMIN"));
+                        visibilityStateWide != null ? visibilityStateWide
+                            : visibilityUser != null && visibilityUser.hasRole("STATE_ADMIN"));
         }
 
         private OffsetDateTime timestamp(String field, String value, boolean endOfDay) {

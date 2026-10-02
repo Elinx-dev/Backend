@@ -43,43 +43,45 @@ public class AuditController {
     }
 
     @GetMapping("/logs")
-    public Map<String, Object> logs(AuditQueryParams params) {
-        return audit.search(params.toFilter());
+    public Map<String, Object> logs(AuditQueryParams params, @RequestParam(required = false) String stateCode) {
+        return audit.search(params.toFilter(), stateCode);
     }
 
     @GetMapping("/summary")
-    public Map<String, Object> summary(AuditQueryParams params) {
-        return audit.summary(params.toFilter());
+    public Map<String, Object> summary(AuditQueryParams params, @RequestParam(required = false) String stateCode) {
+        return audit.summary(params.toFilter(), stateCode);
     }
 
     @GetMapping("/filters")
-    public Map<String, Object> filters() {
-        return audit.facets();
+    public Map<String, Object> filters(@RequestParam(required = false) String stateCode) {
+        return audit.facets(stateCode);
     }
 
     @GetMapping("/logs/{id}")
-    public Map<String, Object> entry(@PathVariable long id) {
-        return audit.entry(id);
+    public Map<String, Object> entry(@PathVariable long id, @RequestParam(required = false) String stateCode) {
+        return audit.entry(id, stateCode);
     }
 
     @GetMapping("/transactions/{transactionRef}")
     public List<Map<String, Object>> transactionTimeline(@PathVariable String transactionRef,
-                                                         @RequestParam(required = false) Integer size) {
-        return audit.timeline(transactionRef, null, size);
+                                                         @RequestParam(required = false) Integer size,
+                                                         @RequestParam(required = false) String stateCode) {
+        return audit.timeline(transactionRef, null, size, stateCode);
     }
 
     @GetMapping("/properties/{propertyRef}")
     public List<Map<String, Object>> propertyTimeline(@PathVariable String propertyRef,
-                                                      @RequestParam(required = false) Integer size) {
-        return audit.timeline(null, propertyRef, size);
+                                                      @RequestParam(required = false) Integer size,
+                                                      @RequestParam(required = false) String stateCode) {
+        return audit.timeline(null, propertyRef, size, stateCode);
     }
 
     @GetMapping("/export")
-    public ResponseEntity<String> export(AuditQueryParams params) {
+    public ResponseEntity<String> export(AuditQueryParams params, @RequestParam(required = false) String stateCode) {
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"audit-trail.csv\"")
                 .contentType(MediaType.parseMediaType("text/csv"))
-                .body(audit.csv(params.toFilter()));
+                .body(audit.csv(params.toFilter(), stateCode));
     }
 
     @PostMapping("/events")

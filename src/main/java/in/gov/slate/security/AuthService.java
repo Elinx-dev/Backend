@@ -265,6 +265,9 @@ public class AuthService {
     }
 
     private String homeRoute(java.util.Set<String> roles) {
+        if (roles.contains("CENTRAL_ADMIN")) {
+            return "/admin/dashboard";
+        }
         if (roles.contains("REGISTRATION_OFFICER")) {
             return "/ro";
         }

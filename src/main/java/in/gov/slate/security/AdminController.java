@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import in.gov.slate.common.ApiException;
@@ -25,17 +26,20 @@ import jakarta.validation.constraints.Size;
 
 @RestController
 @RequestMapping("/api/admin")
-@PreAuthorize("hasRole('STATE_ADMIN')")
+@PreAuthorize("hasAnyRole('STATE_ADMIN', 'CENTRAL_ADMIN')")
 public class AdminController {
 
     private final UserRepository users;
     private final PasswordEncoder encoder;
     private final AuditService audit;
+    private final AdminStateScope stateScope;
 
-    public AdminController(UserRepository users, PasswordEncoder encoder, AuditService audit) {
+    public AdminController(UserRepository users, PasswordEncoder encoder, AuditService audit,
+                           AdminStateScope stateScope) {
         this.users = users;
         this.encoder = encoder;
         this.audit = audit;
+        this.stateScope = stateScope;
     }
 
     public record UserRequest(@NotBlank @Size(max = 320) String username,
@@ -46,23 +50,37 @@ public class AdminController {
                               @NotEmpty List<String> roles, @Size(min = 8, max = 128) String password) {
     }
 
+    @GetMapping("/states")
+    public List<Map<String, Object>> states() {
+        return stateScope.states();
+    }
+
     @GetMapping("/users")
-    public Map<String, Object> users() {
-        CurrentUser current = CurrentUser.require();
-        return Map.of("users", users.adminUsers(current.stateCode()), "roles", users.roles());
+    public Map<String, Object> users(@RequestParam(required = false) String stateCode) {
+        String targetState = stateScope.resolve(stateCode);
+        List<Map<String, Object>> roles = users.roles();
+        if (!CurrentUser.require().hasRole("CENTRAL_ADMIN")) {
+            roles = roles.stream().filter(role -> !"CENTRAL_ADMIN".equals(role.get("code"))).toList();
+        }
+        return Map.of("users", users.adminUsers(targetState), "roles", roles);
     }
 
     @PostMapping("/users")
-    public Map<String, Object> create(@Valid @RequestBody UserRequest request) {
+    public Map<String, Object> create(@RequestParam(required = false) String stateCode,
+                                      @Valid @RequestBody UserRequest request) {
         CurrentUser current = CurrentUser.require();
+        String targetState = stateScope.resolve(stateCode);
+        if (!current.hasRole("CENTRAL_ADMIN") && request.roles().contains("CENTRAL_ADMIN")) {
+            throw ApiException.forbidden("Only a central administrator can assign the central administrator role");
+        }
         if (request.password() == null || request.password().isBlank()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "PASSWORD_REQUIRED", "A temporary password is required");
         }
-        long id = users.createUser(current.stateCode(), request.username().trim(), request.fullName().trim(),
+        long id = users.createUser(targetState, request.username().trim(), request.fullName().trim(),
                 blankToNull(request.email()), blankToNull(request.mobile()), blankToNull(request.designation()),
                 request.department(), encoder.encode(request.password()), request.status(), request.mfaRequired(),
                 request.roles());
-        audit.record(AuditEvent.of("USER_CREATED")
+        audit.record(AuditEvent.of("USER_CREATED").stateCode(targetState)
                 .category(AuditEvent.CATEGORY_SECURITY)
                 .entity("USER", String.valueOf(id))
                 .after(snapshot(request))
@@ -71,20 +89,26 @@ public class AdminController {
     }
 
     @PutMapping("/users/{id}")
-    public Map<String, Object> update(@PathVariable long id, @Valid @RequestBody UserRequest request) {
+    public Map<String, Object> update(@PathVariable long id, @RequestParam(required = false) String stateCode,
+                                     @Valid @RequestBody UserRequest request) {
         CurrentUser current = CurrentUser.require();
-        if (id == current.id() && !request.roles().contains("STATE_ADMIN")) {
+        String targetState = stateScope.resolve(stateCode);
+        String requiredRole = current.hasRole("CENTRAL_ADMIN") ? "CENTRAL_ADMIN" : "STATE_ADMIN";
+        if (request.roles().contains("CENTRAL_ADMIN") && !current.hasRole("CENTRAL_ADMIN")) {
+            throw ApiException.forbidden("Only a central administrator can assign the central administrator role");
+        }
+        if (id == current.id() && !request.roles().contains(requiredRole)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "ADMIN_ROLE_REQUIRED", "You cannot remove your own administrator role");
         }
         UserRepository.UserRow user = users.findById(id)
                 .orElseThrow(() -> ApiException.notFound("User " + id));
-        if (!current.stateCode().equals(user.stateCode())) {
+        if (!targetState.equals(user.stateCode())) {
             throw ApiException.notFound("User " + id);
         }
-        users.updateUser(id, current.stateCode(), request.fullName().trim(), blankToNull(request.email()),
+        users.updateUser(id, targetState, request.fullName().trim(), blankToNull(request.email()),
                 blankToNull(request.mobile()), blankToNull(request.designation()), request.department(),
                 request.status(), request.mfaRequired(), request.roles());
-        audit.record(AuditEvent.of("USER_UPDATED")
+        audit.record(AuditEvent.of("USER_UPDATED").stateCode(targetState)
                 .category(AuditEvent.CATEGORY_SECURITY)
                 .entity("USER", String.valueOf(id))
                 .before(snapshot(user))

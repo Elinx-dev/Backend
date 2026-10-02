@@ -26,6 +26,7 @@ import in.gov.slate.common.ApiException;
 import in.gov.slate.common.AuditEvent;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
+import in.gov.slate.security.AdminStateScope;
 
 @ExtendWith(MockitoExtension.class)
 class AuditQueryServiceTest {
@@ -36,6 +37,9 @@ class AuditQueryServiceTest {
     @Mock
     private AuditService audit;
 
+    @Mock
+    private AdminStateScope stateScope;
+
     @AfterEach
     void clearSecurityContext() {
         SecurityContextHolder.clearContext();
@@ -44,10 +48,11 @@ class AuditQueryServiceTest {
     @Test
     void anAdministratorSeesEveryActionInTheState() {
         authenticate(administrator());
+        when(stateScope.resolve(null)).thenReturn("TN");
         when(repository.search(any(), eq("TN"))).thenReturn(List.of(Map.of("id", 1L)));
         when(repository.count(any(), eq("TN"))).thenReturn(120L);
 
-        Map<String, Object> response = service().search(AuditFilter.builder().size(50));
+        Map<String, Object> response = service().search(AuditFilter.builder().size(50), null);
 
         assertEquals("STATE", response.get("scope"));
         assertEquals(120L, response.get("total"));
@@ -63,7 +68,7 @@ class AuditQueryServiceTest {
         when(repository.search(any(), eq("TN"))).thenReturn(List.of());
         when(repository.count(any(), eq("TN"))).thenReturn(0L);
 
-        Map<String, Object> response = service().search(AuditFilter.builder());
+        Map<String, Object> response = service().search(AuditFilter.builder(), null);
 
         assertEquals("RELATED", response.get("scope"));
         AuditFilter filter = captureFilter();
@@ -77,7 +82,7 @@ class AuditQueryServiceTest {
         authenticate(officer());
         when(repository.findVisibleById(eq(9L), any(), eq("TN"))).thenReturn(Optional.empty());
 
-        assertThrows(ApiException.class, () -> service().entry(9L));
+        assertThrows(ApiException.class, () -> service().entry(9L, null));
     }
 
     @Test
@@ -85,30 +90,45 @@ class AuditQueryServiceTest {
         authenticate(officer());
         when(repository.findVisibleById(eq(9L), any(), eq("TN"))).thenReturn(Optional.empty());
 
-        assertThrows(ApiException.class, () -> service().entry(9L));
+        assertThrows(ApiException.class, () -> service().entry(9L, null));
     }
 
     @Test
     void aTimelineNeedsATransactionOrProperty() {
         authenticate(officer());
 
-        assertThrows(ApiException.class, () -> service().timeline(null, null, null));
+        assertThrows(ApiException.class, () -> service().timeline(null, null, null, null));
     }
 
     @Test
     void exportingIsItselfAudited() {
         authenticate(administrator());
+        when(stateScope.resolve(null)).thenReturn("TN");
         when(repository.search(any(), eq("TN"))).thenReturn(List.of(Map.of(
                 "id", 1L, "action", "MUTATION_APPROVED", "decision", "APPROVED",
                 "detail", "Remarks with a \" quote and, comma")));
 
-        String csv = service().csv(AuditFilter.builder());
+        String csv = service().csv(AuditFilter.builder(), null);
 
         assertTrue(csv.startsWith("id,occurred_at,actor_username"));
         assertTrue(csv.contains("\"Remarks with a \"\" quote and, comma\""));
         ArgumentCaptor<AuditEvent.Builder> event = ArgumentCaptor.forClass(AuditEvent.Builder.class);
         verify(audit).record(event.capture());
         assertEquals("AUDIT_TRAIL_EXPORTED", event.getValue().build().action());
+    }
+
+    @Test
+    void aCentralAdministratorCanSelectAnotherState() {
+        authenticate(centralAdministrator());
+        when(stateScope.resolve("KA")).thenReturn("KA");
+        when(repository.search(any(), eq("KA"))).thenReturn(List.of());
+        when(repository.count(any(), eq("KA"))).thenReturn(0L);
+
+        Map<String, Object> response = service().search(AuditFilter.builder(), "KA");
+
+        assertEquals("STATE", response.get("scope"));
+        AuditFilter filter = captureFilter("KA");
+        assertTrue(filter.stateWide());
     }
 
     @Test
@@ -127,12 +147,16 @@ class AuditQueryServiceTest {
     }
 
     private AuditQueryService service() {
-        return new AuditQueryService(repository, audit);
+        return new AuditQueryService(repository, audit, stateScope);
     }
 
     private AuditFilter captureFilter() {
+        return captureFilter("TN");
+    }
+
+    private AuditFilter captureFilter(String stateCode) {
         ArgumentCaptor<AuditFilter> filter = ArgumentCaptor.forClass(AuditFilter.class);
-        verify(repository).search(filter.capture(), eq("TN"));
+        verify(repository).search(filter.capture(), eq(stateCode));
         return filter.getValue();
     }
 
@@ -144,6 +168,11 @@ class AuditQueryServiceTest {
     private CurrentUser administrator() {
         return new CurrentUser(2L, "admin.tn", "State Administrator", "TN", "REGISTRATION",
                 Set.of("STATE_ADMIN"), Set.of(), Set.of(), Set.of());
+    }
+
+    private CurrentUser centralAdministrator() {
+        return new CurrentUser(3L, "admin.central", "Central Administrator", "TN", "ADMIN",
+                Set.of("CENTRAL_ADMIN"), Set.of(), Set.of(), Set.of());
     }
 
     private CurrentUser officer() {

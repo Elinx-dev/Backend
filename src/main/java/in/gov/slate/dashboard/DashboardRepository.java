@@ -235,10 +235,9 @@ public class DashboardRepository {
     public List<Map<String, Object>> byOffice(DashboardFilter f) {
         return jdbc.queryForList("""
                 SELECT t.state_code AS "stateCode", t.sro_code AS "sroCode",
-                       coalesce((SELECT max(s.sro_name)
-                                   FROM master.sub_registrar_office s
-                                   JOIN master.registration_district d ON d.id = s.district_id
-                                  WHERE s.sro_code = t.sro_code AND d.state_code = t.state_code),
+                       coalesce((SELECT max(j.sro_name)
+                                   FROM master.jurisdiction j
+                                  WHERE j.sro_code = t.sro_code AND j.state_code = t.state_code),
                                 t.sro_code) AS "sroName",
                        count(*) AS "transactions",
                        count(*) FILTER (WHERE t.registered_at IS NOT NULL) AS "registered",
@@ -328,16 +327,15 @@ public class DashboardRepository {
                   WHERE pay.transaction_id = t.id AND pay.status = 'SUCCESS') AS "feesPaid"
                 """;
         String base = """
-                FROM core.transaction t
-                JOIN core.property p ON p.id = t.property_id
-                LEFT JOIN LATERAL (SELECT max(s.sro_name) AS sro_name
-                                     FROM master.sub_registrar_office s
-                                     JOIN master.registration_district rd ON rd.id = s.district_id
-                                    WHERE s.sro_code = t.sro_code AND rd.state_code = t.state_code) o ON TRUE
-                LEFT JOIN LATERAL (SELECT max(dt.name) AS name FROM master.deed_type dt
-                                    WHERE dt.state_code = t.state_code AND dt.code = t.deed_type_code) d ON TRUE
+        FROM core.transaction t
+        JOIN core.property p ON p.id = t.property_id
+        LEFT JOIN LATERAL (SELECT max(j.sro_name) AS sro_name
+                             FROM master.jurisdiction j
+                            WHERE j.sro_code = t.sro_code AND j.state_code = t.state_code) o ON TRUE
+        LEFT JOIN LATERAL (SELECT max(dt.name) AS name FROM master.deed_type dt
+                            WHERE dt.state_code = t.state_code AND dt.code = t.deed_type_code) d ON TRUE
                WHERE t.initiated_at >= :from AND t.initiated_at < :to %s %s %s
-                """.formatted(state(f, "t"),
+        """.formatted(state(f, "t"),
                 q.status() == null ? "" : "AND t.status = :status",
                 q.search() == null ? "" : """
                         AND (t.txn_ref ILIKE :search OR p.property_ref ILIKE :search OR t.sro_code ILIKE :search

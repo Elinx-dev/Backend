@@ -8,15 +8,20 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import in.gov.slate.common.CurrentUser;
+import in.gov.slate.security.AdminStateScope;
+
 @RestController
 @RequestMapping("/api/admin/dashboard")
-@PreAuthorize("hasRole('STATE_ADMIN')")
+@PreAuthorize("hasAnyRole('STATE_ADMIN', 'CENTRAL_ADMIN')")
 public class DashboardController {
 
     private final DashboardService dashboard;
+    private final AdminStateScope stateScope;
 
-    public DashboardController(DashboardService dashboard) {
+    public DashboardController(DashboardService dashboard, AdminStateScope stateScope) {
         this.dashboard = dashboard;
+        this.stateScope = stateScope;
     }
 
     /**
@@ -28,7 +33,12 @@ public class DashboardController {
                                         @RequestParam(required = false) String period,
                                         @RequestParam(required = false) String from,
                                         @RequestParam(required = false) String to) {
-        return dashboard.overview(state, period, from, to);
+        String targetState = stateScope.resolveDashboardState(state);
+        Map<String, Object> result = dashboard.overview(targetState, period, from, to);
+        if (!CurrentUser.require().hasRole("CENTRAL_ADMIN")) {
+            result.put("states", stateScope.states());
+        }
+        return result;
     }
 
     /**
@@ -44,6 +54,7 @@ public class DashboardController {
                                        @RequestParam(required = false) String dataset,
                                        @RequestParam(required = false) String q,
                                        @RequestParam(required = false) String status) {
-        return dashboard.records(state, period, from, to, dataset, q, status);
+        String targetState = stateScope.resolveDashboardState(state);
+        return dashboard.records(targetState, period, from, to, dataset, q, status);
     }
 }
