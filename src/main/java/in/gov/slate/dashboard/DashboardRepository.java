@@ -1,5 +1,6 @@
 package in.gov.slate.dashboard;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -286,6 +287,128 @@ public class DashboardRepository {
                  ORDER BY a.occurred_at DESC, a.id DESC
                  LIMIT 10
                 """.formatted(state(f, "a")), params(f));
+    }
+
+    public Map<String, Object> records(DashboardFilter f, DashboardRecordQuery query) {
+        MapSqlParameterSource params = params(f).addValue("limit", DashboardRecordQuery.LIMIT);
+        if (query.search() != null) {
+            params.addValue("search", query.likePattern());
+        }
+        if (query.status() != null) {
+            params.addValue("status", query.status());
+        }
+        String[] parts = switch (query.dataset()) {
+            case TRANSACTIONS -> transactionRecords(f, query);
+            case PROPERTIES -> propertyRecords(f, query);
+            case RULE_CHECKS -> ruleCheckRecords(f, query);
+            case ISSUES -> issueRecords(f, query);
+        };
+        String base = parts[1];
+        Long total = jdbc.queryForObject("SELECT count(*) " + base, params, Long.class);
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT " + parts[0] + " " + base + " ORDER BY " + parts[2] + " LIMIT :limit", params);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("total", total == null ? 0L : total);
+        out.put("rows", rows);
+        return out;
+    }
+
+    private static String[] transactionRecords(DashboardFilter f, DashboardRecordQuery q) {
+        String columns = """
+                t.txn_ref AS "txnRef", t.state_code AS "stateCode", t.sro_code AS "sroCode",
+                coalesce(o.sro_name, t.sro_code) AS "sroName", p.property_ref AS "propertyRef",
+                t.deed_type_code AS "deedTypeCode", coalesce(d.name, t.deed_type_code) AS "deedType",
+                t.status AS "status", t.initiated_at AS "initiatedAt", t.registered_at AS "registeredAt",
+                (SELECT count(*) FROM rules.rule_check_request rq JOIN rules.rule_check_result rr ON rr.request_id = rq.id
+                  WHERE rq.transaction_id = t.id) AS "ruleChecks",
+                (SELECT count(*) FROM rules.rule_check_request rq JOIN rules.rule_check_result rr ON rr.request_id = rq.id
+                  WHERE rq.transaction_id = t.id
+                    AND rr.overall_outcome IN ('DISCREPANCY_DETECTED','REVIEW_REQUIRED','NOT_CHECKED')) AS "ruleFlags",
+                (SELECT coalesce(sum(pay.amount), 0) FROM core.payment pay
+                  WHERE pay.transaction_id = t.id AND pay.status = 'SUCCESS') AS "feesPaid"
+                """;
+        String base = """
+                FROM core.transaction t
+                JOIN core.property p ON p.id = t.property_id
+                LEFT JOIN LATERAL (SELECT max(s.sro_name) AS sro_name
+                                     FROM master.sub_registrar_office s
+                                     JOIN master.registration_district rd ON rd.id = s.district_id
+                                    WHERE s.sro_code = t.sro_code AND rd.state_code = t.state_code) o ON TRUE
+                LEFT JOIN LATERAL (SELECT max(dt.name) AS name FROM master.deed_type dt
+                                    WHERE dt.state_code = t.state_code AND dt.code = t.deed_type_code) d ON TRUE
+               WHERE t.initiated_at >= :from AND t.initiated_at < :to %s %s %s
+                """.formatted(state(f, "t"),
+                q.status() == null ? "" : "AND t.status = :status",
+                q.search() == null ? "" : """
+                        AND (t.txn_ref ILIKE :search OR p.property_ref ILIKE :search OR t.sro_code ILIKE :search
+                             OR o.sro_name ILIKE :search OR d.name ILIKE :search OR t.deed_type_code ILIKE :search)""");
+        return new String[] { columns, base, "t.initiated_at DESC, t.id DESC" };
+    }
+
+    private static String[] propertyRecords(DashboardFilter f, DashboardRecordQuery q) {
+        String columns = """
+                p.property_ref AS "propertyRef", p.state_code AS "stateCode", p.district_code AS "districtCode",
+                p.village_code AS "villageCode", p.sro_code AS "sroCode", p.survey_no AS "surveyNo",
+                p.subdivision_no AS "subdivisionNo", p.property_type_code AS "propertyType",
+                p.extent_value AS "extentValue", p.extent_unit AS "extentUnit", p.status AS "status",
+                p.created_at AS "createdAt",
+                (SELECT count(*) FROM core.transaction t WHERE t.property_id = p.id) AS "transactions"
+                """;
+        String base = """
+                FROM core.property p
+               WHERE p.created_at >= :from AND p.created_at < :to %s %s %s
+                """.formatted(state(f, "p"),
+                q.status() == null ? "" : "AND p.status = :status",
+                q.search() == null ? "" : """
+                        AND (p.property_ref ILIKE :search OR p.survey_no ILIKE :search OR p.ulpin ILIKE :search
+                             OR p.sro_code ILIKE :search OR p.district_code ILIKE :search OR p.village_code ILIKE :search)""");
+        return new String[] { columns, base, "p.created_at DESC, p.id DESC" };
+    }
+
+    private static String[] ruleCheckRecords(DashboardFilter f, DashboardRecordQuery q) {
+        String columns = """
+                r.checked_at AS "checkedAt", q.state_code AS "stateCode", t.txn_ref AS "txnRef",
+                t.sro_code AS "sroCode", r.engine AS "engine", r.overall_outcome AS "outcome",
+                r.reason_code AS "reasonCode", r.advisory AS "advisory", t.status AS "transactionStatus"
+                """;
+        String base = """
+                FROM rules.rule_check_result r
+                JOIN rules.rule_check_request q ON q.id = r.request_id
+                JOIN core.transaction t ON t.id = q.transaction_id
+               WHERE r.checked_at >= :from AND r.checked_at < :to %s %s %s
+                """.formatted(state(f, "q"),
+                q.status() == null ? "" : "AND r.overall_outcome = :status",
+                q.search() == null ? "" : """
+                        AND (t.txn_ref ILIKE :search OR r.reason_code ILIKE :search OR r.engine ILIKE :search
+                             OR t.sro_code ILIKE :search)""");
+        return new String[] { columns, base, "r.checked_at DESC, r.id DESC" };
+    }
+
+    private static String[] issueRecords(DashboardFilter f, DashboardRecordQuery q) {
+        String columns = """
+                a.occurred_at AS "occurredAt", a.state_code AS "stateCode",
+                CASE WHEN a.to_status = 'EXCEPTION' THEN 'EXCEPTION'
+                     WHEN a.action = 'OBJECTION_RAISED' THEN 'OBJECTION'
+                     ELSE 'FAILURE' END AS "kind",
+                a.action AS "action", a.transaction_ref AS "transactionRef", a.property_ref AS "propertyRef",
+                a.actor_username AS "actor", a.actor_role AS "actorRole", a.detail AS "detail"
+                """;
+        String kind = q.status() == null ? "" : switch (q.status()) {
+            case "EXCEPTION" -> "AND a.to_status = 'EXCEPTION'";
+            case "OBJECTION" -> "AND a.action = 'OBJECTION_RAISED'";
+            default -> "AND a.outcome = 'FAILURE' AND a.transaction_ref IS NOT NULL AND a.to_status IS DISTINCT FROM 'EXCEPTION'";
+        };
+        String base = """
+                FROM sec.audit_log a
+               WHERE a.occurred_at >= :from AND a.occurred_at < :to %s
+                 AND (a.to_status = 'EXCEPTION'
+                      OR a.action = 'OBJECTION_RAISED'
+                      OR (a.outcome = 'FAILURE' AND a.transaction_ref IS NOT NULL)) %s %s
+                """.formatted(state(f, "a"), kind,
+                q.search() == null ? "" : """
+                        AND (a.action ILIKE :search OR a.transaction_ref ILIKE :search OR a.property_ref ILIKE :search
+                             OR a.actor_username ILIKE :search OR a.detail ILIKE :search)""");
+        return new String[] { columns, base, "a.occurred_at DESC, a.id DESC" };
     }
 
     private static String state(DashboardFilter f, String alias) {

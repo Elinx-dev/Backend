@@ -33,10 +33,7 @@ public class DashboardService {
     @Transactional(readOnly = true)
     public Map<String, Object> overview(String state, String period, String from, String to) {
         List<Map<String, Object>> states = repository.states();
-        DashboardFilter filter = DashboardFilter.of(state, period, from, to, LocalDate.now(clock));
-        if (!filter.allStates() && states.stream().noneMatch(s -> filter.stateCode().equals(s.get("code")))) {
-            throw ApiException.badRequest("Unknown state code " + filter.stateCode());
-        }
+        DashboardFilter filter = resolve(states, state, period, from, to);
 
         Map<String, Object> failures = new LinkedHashMap<>(repository.failureOverview(filter));
         failures.put("ruleReasons", repository.ruleFailureReasons(filter));
@@ -60,6 +57,33 @@ public class DashboardService {
         response.put("recentIssues", repository.recentIssues(filter));
         response.put("generatedAt", OffsetDateTime.now(clock).toString());
         return response;
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> records(String state, String period, String from, String to,
+                                       String dataset, String search, String status) {
+        DashboardFilter filter = resolve(repository.states(), state, period, from, to);
+        DashboardRecordQuery query = DashboardRecordQuery.of(dataset, search, status);
+        Map<String, Object> result = repository.records(filter, query);
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("filter", filterView(filter));
+        response.put("dataset", query.dataset().name());
+        response.put("search", query.search());
+        response.put("status", query.status());
+        response.put("limit", DashboardRecordQuery.LIMIT);
+        response.put("total", result.get("total"));
+        response.put("rows", result.get("rows"));
+        return response;
+    }
+
+    private DashboardFilter resolve(List<Map<String, Object>> states, String state, String period,
+                                    String from, String to) {
+        DashboardFilter filter = DashboardFilter.of(state, period, from, to, LocalDate.now(clock));
+        if (!filter.allStates() && states.stream().noneMatch(s -> filter.stateCode().equals(s.get("code")))) {
+            throw ApiException.badRequest("Unknown state code " + filter.stateCode());
+        }
+        return filter;
     }
 
     private static Map<String, Object> filterView(DashboardFilter filter) {

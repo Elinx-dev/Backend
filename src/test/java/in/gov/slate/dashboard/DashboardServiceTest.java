@@ -49,6 +49,20 @@ class DashboardServiceTest {
     }
 
     @Test
+    void searchesRecordsWithinResolvedFilter() {
+        when(repository.states()).thenReturn(List.of(Map.of("code", "TN", "name", "Tamil Nadu")));
+        when(repository.records(any(), any())).thenReturn(Map.of("total", 1L, "rows", List.of(Map.of("txnRef", "T-1"))));
+
+        Map<String, Object> result = new DashboardService(repository, CLOCK)
+                .records("TN", "TODAY", null, null, "transactions", "T-1", "REGISTERED");
+
+        assertThat(result).containsEntry("dataset", "TRANSACTIONS").containsEntry("total", 1L)
+                .containsEntry("limit", DashboardRecordQuery.LIMIT).containsEntry("status", "REGISTERED");
+        verify(repository).records(argThat(f -> "TN".equals(f.stateCode())),
+                argThat(q -> "T-1".equals(q.search()) && q.dataset() == DashboardRecordQuery.Dataset.TRANSACTIONS));
+    }
+
+    @Test
     void rejectsStateThatIsNotConfigured() {
         when(repository.states()).thenReturn(List.of(Map.of("code", "TN", "name", "Tamil Nadu")));
 
