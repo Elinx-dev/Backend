@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.sql.Array;
@@ -92,12 +94,56 @@ class WorkflowEngineTest {
                 + "Available actions from DRAFT: REQUEST_CONSENT", error.getMessage());
     }
 
+    @Test
+    void failedConsentGuardExplainsMissingPrerequisitesWithoutRunningUnrelatedRules() throws Exception {
+        Array roles = mock(Array.class);
+        when(roles.getArray()).thenReturn(new String[]{"REGISTRATION_OFFICER"});
+
+        Map<String, Object> requestConsent = new HashMap<>();
+        requestConsent.put("action_code", "REQUEST_CONSENT");
+        requestConsent.put("to_status", "CONSENT_PENDING");
+        requestConsent.put("allowed_roles", roles);
+        requestConsent.put("guard_expr", "partiesAndWitnessesComplete");
+        requestConsent.put("requires_reason", false);
+
+        TransactionContext consentContext = consentContext();
+        when(jdbc.queryForList(anyString(), any(SqlParameterSource.class)))
+                .thenReturn(List.of(requestConsent));
+        when(validation.guard("partiesAndWitnessesComplete", consentContext)).thenReturn(false);
+
+        WorkflowEngine workflow = new WorkflowEngine(jdbc, config, validation, audit);
+
+        ApiException error = assertThrows(ApiException.class,
+                () -> workflow.apply(consentContext, "REQUEST_CONSENT", null, user()));
+
+        assertEquals("CONFLICT", error.getCode());
+        assertEquals("Cannot request consent: 2 witness(es); Aadhaar for: Buyer, Seller", error.getMessage());
+        verify(validation, never()).evaluate(any(), anyString(), org.mockito.ArgumentMatchers.anyBoolean());
+    }
+
     private TransactionContext context() {
         return new TransactionContext(
                 Map.of("id", 12L, "txn_ref", "TXN-TN-2026-000010", "status", "DRAFT", "workflow_id", 1L),
                 Map.of("property_ref", "TN-CHN-00000001"),
                 Map.of(),
                 List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of());
+    }
+
+    private TransactionContext consentContext() {
+        return new TransactionContext(
+                Map.of("id", 12L, "txn_ref", "TXN-TN-2026-000010", "status", "DRAFT", "workflow_id", 1L),
+                Map.of("property_ref", "TN-CHN-00000001"),
+                Map.of("witness_required", true, "min_witness_count", 2),
+                List.of(
+                        Map.of("id", 10L, "side", "SIDE_1", "name", "Buyer", "aadhaar_captured", false),
+                        Map.of("id", 11L, "side", "SIDE_2", "name", "Seller", "aadhaar_captured", false)),
                 List.of(),
                 List.of(),
                 List.of(),

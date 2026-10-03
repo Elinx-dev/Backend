@@ -106,10 +106,35 @@ public class WorkflowEngine {
             throw ApiException.forbidden("Your role may not perform " + actionCode);
         }
         if (!guardPasses(transition, ctx)) {
-            // Surface the specific validation failures rather than a bare guard name.
-            validation.evaluate(ctx, "TRANSACTION", true);
-            throw ApiException.conflict("Guard " + transition.get("guard_expr") + " is not satisfied");
+            throw ApiException.conflict(guardFailureMessage(transition, ctx));
         }
+    }
+
+    private String guardFailureMessage(Map<String, Object> transition, TransactionContext ctx) {
+        String guard = (String) transition.get("guard_expr");
+        if ("partiesAndWitnessesComplete".equals(guard)) {
+            List<String> missing = new java.util.ArrayList<>();
+            if (ctx.side("SIDE_1").isEmpty()) {
+                missing.add("at least one party on Side 1");
+            }
+            if (ctx.side("SIDE_2").isEmpty()) {
+                missing.add("at least one party on Side 2");
+            }
+            boolean witnessRequired = Boolean.TRUE.equals(ctx.deedType().get("witness_required"));
+            int minimumWitnesses = ((Number) ctx.deedType().get("min_witness_count")).intValue();
+            if (witnessRequired && ctx.witnesses().size() < minimumWitnesses) {
+                missing.add(minimumWitnesses + " witness(es)");
+            }
+            List<String> partiesWithoutAadhaar = ctx.parties().stream()
+                    .filter(party -> !Boolean.TRUE.equals(party.get("aadhaar_captured")))
+                    .map(party -> String.valueOf(party.get("name")))
+                    .toList();
+            if (!partiesWithoutAadhaar.isEmpty()) {
+                missing.add("Aadhaar for: " + String.join(", ", partiesWithoutAadhaar));
+            }
+            return "Cannot request consent: " + String.join("; ", missing);
+        }
+        return "Guard " + guard + " is not satisfied";
     }
 
     private List<String> requiredStatuses(TransactionContext ctx, String actionCode) {

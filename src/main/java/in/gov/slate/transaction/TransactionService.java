@@ -346,10 +346,7 @@ public class TransactionService {
     }
 
     private void validateAadhaar(String aadhaar) {
-        if (aadhaar == null || aadhaar.isBlank()) {
-            return;
-        }
-        if (!aadhaar.matches("\\d{12}")) {
+        if (aadhaar == null || aadhaar.isBlank() || !aadhaar.matches("\\d{12}")) {
             throw ApiException.badRequest("Aadhaar number must be exactly 12 digits");
         }
     }
