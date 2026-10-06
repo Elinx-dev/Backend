@@ -104,4 +104,23 @@ class RevenueServiceTest {
         verify(jdbc).update(argThat(sql -> sql.contains("INSERT INTO revenue.current_state")), params.capture());
         assertThat(params.getValue().getValue("landContext")).isNull();
     }
+
+    @Test
+    void vaoCannotVerifyBeforeAVisitSlotIsBooked() {
+        CurrentUser vao = new CurrentUser(4L, "vao.demo", "Demo VAO", "TN", "REVENUE",
+                Set.of("VAO"), Set.of("TXN_READ", "REVENUE_VERIFY"), Set.of(), Set.of("PERUNGUDI"));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(vao, null));
+        Map<String, Object> mutation = Map.of("id", 3L, "status", "VAO_PENDING", "transaction_id", 21L,
+                "txn_ref", "TXN-TN-2026-000003", "property_id", 11L);
+        when(jdbc.queryForList(anyString(), any(SqlParameterSource.class))).thenAnswer(invocation ->
+                ((String) invocation.getArgument(0)).contains("SELECT m.*") ? List.of(mutation) : List.of());
+        when(jdbc.queryForObject(anyString(), any(SqlParameterSource.class), org.mockito.ArgumentMatchers.eq(Boolean.class)))
+                .thenReturn(false);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        service.verifyAndForward(3L, new RevenueService.VerifyRequest("ok")))
+                .hasMessageContaining("Book a site-visit slot");
+        org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never())
+                .update(argThat(sql -> sql.contains("UPDATE revenue.proposed_mutation")), any(SqlParameterSource.class));
+    }
 }

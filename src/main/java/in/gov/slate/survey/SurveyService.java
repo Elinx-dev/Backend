@@ -140,7 +140,7 @@ public class SurveyService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("SURVEY_SCHEDULE");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
-        jdbc.update("UPDATE survey.site_visit SET status = 'ACCEPTED' WHERE id = :id AND transaction_id = :txnId",
+        jdbc.update("UPDATE survey.site_visit SET status = 'ACCEPTED', accepted_at = now() WHERE id = :id AND transaction_id = :txnId",
                 new MapSqlParameterSource().addValue("id", visitId).addValue("txnId", ctx.id()));
         audit.record("SURVEY_VISIT_ACCEPTED", "SITE_VISIT", String.valueOf(visitId), txnRef, ctx.propertyRef(),
                 Map.of("visitId", visitId), null);
