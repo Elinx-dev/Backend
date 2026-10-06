@@ -405,7 +405,7 @@ public class PropertyService {
     }
 
     /** Reads cfg.option_value.attributes.allowMultipleOwners for the owner type; null if not configured. */
-    Boolean allowsMultipleOwners(String stateCode, String ownerTypeCode) {
+    public Boolean allowsMultipleOwners(String stateCode, String ownerTypeCode) {
         if (ownerTypeCode == null) {
             return null;
         }
@@ -438,37 +438,42 @@ public class PropertyService {
             if (owner == null) {
                 throw ApiException.badRequest(prefix + "details are required");
             }
-            requireText(owner.ownerName(), prefix + "name is required");
-            requirePattern(owner.pan(), PAN, prefix + "PAN must match AAAAA9999A");
-            requireText(owner.address(), prefix + "address is required");
-            if (form.ownerAadhaar()) {
-                requirePattern(owner.aadhaarNumber(), AADHAAR, prefix + "Aadhaar must contain exactly 12 digits");
+            validateOwnerFields(form, prefix, owner);
+        }
+    }
+
+    /** Field checks for one owner (or transaction party) of the given owner-type form. */
+    public static void validateOwnerFields(OwnerType.Form form, String prefix, OwnerInput owner) {
+        requireText(owner.ownerName(), prefix + "name is required");
+        requirePattern(owner.pan(), PAN, prefix + "PAN must match AAAAA9999A");
+        requireText(owner.address(), prefix + "address is required");
+        if (form.ownerAadhaar()) {
+            requirePattern(owner.aadhaarNumber(), AADHAAR, prefix + "Aadhaar must contain exactly 12 digits");
+        }
+        if (form.ownerMobile()) {
+            requirePattern(owner.mobile(), MOBILE, prefix + "mobile must be a 10-digit Indian mobile number");
+        }
+        if (form == OwnerType.Form.COMPANY) {
+            requirePattern(owner.registrationNo(), CIN, prefix + "CIN must be a valid 21-character CIN");
+        } else if (form == OwnerType.Form.LLP) {
+            requirePattern(owner.registrationNo(), LLPIN, prefix + "LLPIN must match AAA-9999");
+        } else if (form.registrationNo()) {
+            requireText(owner.registrationNo(), prefix + "registration number is required");
+        }
+        if (form.representativeRole() != null) {
+            RepresentativeInput rep = owner.representative();
+            String role = prefix + representativeLabel(form) + " ";
+            if (rep == null) {
+                throw ApiException.badRequest(role + "details are required");
             }
-            if (form.ownerMobile()) {
-                requirePattern(owner.mobile(), MOBILE, prefix + "mobile must be a 10-digit Indian mobile number");
+            requireText(rep.name(), role + "name is required");
+            if (form.representativeDesignation()) {
+                requireText(rep.designation(), role + "designation is required");
             }
-            if (form == OwnerType.Form.COMPANY) {
-                requirePattern(owner.registrationNo(), CIN, prefix + "CIN must be a valid 21-character CIN");
-            } else if (form == OwnerType.Form.LLP) {
-                requirePattern(owner.registrationNo(), LLPIN, prefix + "LLPIN must match AAA-9999");
-            } else if (form.registrationNo()) {
-                requireText(owner.registrationNo(), prefix + "registration number is required");
-            }
-            if (form.representativeRole() != null) {
-                RepresentativeInput rep = owner.representative();
-                String role = prefix + representativeLabel(form) + " ";
-                if (rep == null) {
-                    throw ApiException.badRequest(role + "details are required");
-                }
-                requireText(rep.name(), role + "name is required");
-                if (form.representativeDesignation()) {
-                    requireText(rep.designation(), role + "designation is required");
-                }
-                requirePattern(rep.aadhaarNumber(), AADHAAR, role + "Aadhaar must contain exactly 12 digits");
-                requirePattern(rep.pan(), PAN, role + "PAN must match AAAAA9999A");
-                if (form.representativeMobile()) {
-                    requirePattern(rep.mobile(), MOBILE, role + "mobile must be a 10-digit Indian mobile number");
-                }
+            requirePattern(rep.aadhaarNumber(), AADHAAR, role + "Aadhaar must contain exactly 12 digits");
+            requirePattern(rep.pan(), PAN, role + "PAN must match AAAAA9999A");
+            if (form.representativeMobile()) {
+                requirePattern(rep.mobile(), MOBILE, role + "mobile must be a 10-digit Indian mobile number");
             }
         }
     }

@@ -18,6 +18,8 @@ import in.gov.slate.common.CurrentUser;
 import in.gov.slate.common.Hashes;
 import in.gov.slate.common.NumberingService;
 import in.gov.slate.config.ConfigService;
+import in.gov.slate.property.OwnerType;
+import in.gov.slate.property.PropertyService;
 import jakarta.validation.constraints.NotBlank;
 
 @Service
@@ -36,9 +38,12 @@ public class TransactionService {
     private final String aadhaarSalt;
     private final String aadhaarSaltRef;
 
+    private final PropertyService properties;
+
     public TransactionService(NamedParameterJdbcTemplate jdbc, ConfigService config,
                               TransactionRepository repository, WorkflowEngine workflow,
                               ValidationEngine validation, NumberingService numbering, AuditService audit,
+                              PropertyService properties,
                               @Value("${slate.aadhaar.salt}") String aadhaarSalt,
                               @Value("${slate.aadhaar.salt-ref}") String aadhaarSaltRef) {
         this.jdbc = jdbc;
@@ -48,6 +53,7 @@ public class TransactionService {
         this.validation = validation;
         this.numbering = numbering;
         this.audit = audit;
+        this.properties = properties;
         this.aadhaarSalt = aadhaarSalt;
         this.aadhaarSaltRef = aadhaarSaltRef;
     }
@@ -74,11 +80,11 @@ public class TransactionService {
      * A SIDE_1 party is always a current property owner, referenced by {@code propertyOwnerId};
      * its details are read from the property record, not from the request.
      */
-    public record PartyInput(@NotBlank String side, String role, String partyType, String name,
-                             String aadhaarNumber, String kartaName, String kartaAadhaarNumber, String pan,
-                             String address, String relationshipCode, BigDecimal existingSharePct,
-                             BigDecimal shareTransferredPct, BigDecimal extentTransferred,
-                             BigDecimal resultingSharePct, String authorityPoaReference, Long propertyOwnerId) {
+    public record PartyInput(@NotBlank String side, String role, String partyType, String ownerTypeCode,
+                             String name, String aadhaarNumber, String kartaName, String kartaAadhaarNumber,
+                             String pan, String mobile, String address, String registrationNo,
+                             PropertyService.RepresentativeInput representative, String relationshipCode,
+                             BigDecimal extentTransferred, String authorityPoaReference, Long propertyOwnerId) {
     }
 
     public record WitnessInput(@NotBlank String name, String address, String idProofType, String idProofRef) {
@@ -283,47 +289,63 @@ public class TransactionService {
         List<PartyInput> resolved = resolveParties(ctx, parties);
         TransactionTypeRules.validateParties(ctx.deedType(), resolved,
                 code -> config.isActiveBloodRelation(user.stateCode(), code));
-        resolved.stream().filter(p -> p.propertyOwnerId() == null).forEach(this::validateEnteredParty);
+        validateEnteredParties(user.stateCode(), ctx.deedType(), resolved);
 
         jdbc.update("DELETE FROM core.transaction_party WHERE transaction_id = :id",
                 new MapSqlParameterSource("id", ctx.id()));
 
         Map<String, Integer> seqBySide = new LinkedHashMap<>();
         for (PartyInput p : resolved) {
-            String aadhaar = p.aadhaarNumber() != null && AADHAAR.matcher(p.aadhaarNumber()).matches()
-                    ? p.aadhaarNumber() : null;
+            OwnerType.Form form = OwnerType.fromCode(p.ownerTypeCode()).map(OwnerType::form).orElse(null);
+            PropertyService.RepresentativeInput rep = form == null || form.representativeRole() == null
+                    ? null : p.representative();
+            String ownAadhaar = twelveDigits(p.aadhaarNumber());
+            String repAadhaar = rep == null ? null : twelveDigits(rep.aadhaarNumber());
+            // Entities give Aadhaar consent through their representative.
+            String aadhaar = ownAadhaar != null ? ownAadhaar : repAadhaar;
+            boolean huf = form == OwnerType.Form.HUF && rep != null;
             int seq = seqBySide.merge(p.side(), 1, Integer::sum);
             String defaultRole = "SIDE_1".equals(p.side())
                     ? (String) ctx.deedType().get("side1_role")
                     : (String) ctx.deedType().get("side2_role");
             jdbc.update("""
-                    INSERT INTO core.transaction_party (transaction_id, side, role, seq, party_type, name,
-                        aadhaar_hash, aadhaar_last4, aadhaar_salt_ref, karta_name, karta_aadhaar_hash, pan, address,
-                        relationship_code, existing_share_pct, share_transferred_pct, extent_transferred,
-                        resulting_share_pct, authority_poa_reference, property_owner_id)
-                    VALUES (:txnId, :side, :role, :seq, :partyType, :name,
-                        :aadhaarHash, :last4, :saltRef, :kartaName, :kartaHash, :pan, :address,
-                        :relationshipCode, :existingShare, :shareTransferred, :extentTransferred,
-                        :resultingShare, :authorityRef, :propertyOwnerId)
+                    INSERT INTO core.transaction_party (transaction_id, side, role, seq, party_type, owner_type_code,
+                        name, aadhaar_hash, aadhaar_last4, aadhaar_salt_ref, karta_name, karta_aadhaar_hash, pan,
+                        mobile, address, registration_no, representative_role, representative_name,
+                        representative_designation, representative_aadhaar_last4, representative_pan,
+                        representative_mobile, relationship_code, extent_transferred, authority_poa_reference,
+                        property_owner_id)
+                    VALUES (:txnId, :side, :role, :seq, :partyType, :ownerType,
+                        :name, :aadhaarHash, :last4, :saltRef, :kartaName, :kartaHash, :pan,
+                        :mobile, :address, :registrationNo, :repRole, :repName,
+                        :repDesignation, :repLast4, :repPan,
+                        :repMobile, :relationshipCode, :extentTransferred, :authorityRef,
+                        :propertyOwnerId)
                     """, new MapSqlParameterSource()
                     .addValue("txnId", ctx.id())
                     .addValue("side", p.side())
                     .addValue("role", p.role() != null ? p.role() : defaultRole)
                     .addValue("seq", seq)
                     .addValue("partyType", p.partyType())
+                    .addValue("ownerType", p.ownerTypeCode())
                     .addValue("name", p.name())
                     .addValue("aadhaarHash", hashAadhaar(aadhaar))
                     .addValue("last4", last4(aadhaar))
                     .addValue("saltRef", aadhaar == null ? null : aadhaarSaltRef)
-                    .addValue("kartaName", p.kartaName())
-                    .addValue("kartaHash", hashAadhaar(p.kartaAadhaarNumber()))
+                    .addValue("kartaName", huf ? rep.name() : p.kartaName())
+                    .addValue("kartaHash", hashAadhaar(huf ? repAadhaar : p.kartaAadhaarNumber()))
                     .addValue("pan", p.pan())
+                    .addValue("mobile", form != null && !form.ownerMobile() ? null : p.mobile())
                     .addValue("address", p.address())
+                    .addValue("registrationNo", form != null && form.registrationNo() ? p.registrationNo() : null)
+                    .addValue("repRole", rep == null ? null : form.representativeRole())
+                    .addValue("repName", rep == null ? null : rep.name())
+                    .addValue("repDesignation", rep == null || !form.representativeDesignation() ? null : rep.designation())
+                    .addValue("repLast4", last4(repAadhaar))
+                    .addValue("repPan", rep == null ? null : rep.pan())
+                    .addValue("repMobile", rep == null || !form.representativeMobile() ? null : rep.mobile())
                     .addValue("relationshipCode", p.relationshipCode())
-                    .addValue("existingShare", p.existingSharePct())
-                    .addValue("shareTransferred", p.shareTransferredPct())
                     .addValue("extentTransferred", p.extentTransferred())
-                    .addValue("resultingShare", p.resultingSharePct())
                     .addValue("authorityRef", p.authorityPoaReference())
                     .addValue("propertyOwnerId", p.propertyOwnerId()));
         }
@@ -341,7 +363,9 @@ public class TransactionService {
      */
     private List<PartyInput> resolveParties(TransactionContext ctx, List<PartyInput> parties) {
         List<Map<String, Object>> owners = jdbc.queryForList("""
-                SELECT id, owner_type_code, owner_name, aadhaar_number, pan, address
+                SELECT id, owner_type_code, owner_name, aadhaar_number, pan, mobile, address, registration_no,
+                       representative_name, representative_designation, representative_aadhaar,
+                       representative_pan, representative_mobile
                   FROM core.property_owner
                  WHERE property_id = :propertyId AND effective_to IS NULL
                  ORDER BY id
@@ -361,12 +385,24 @@ public class TransactionService {
         }
         List<PartyInput> out = new java.util.ArrayList<>();
         for (Map<String, Object> o : chosen) {
-            out.add(new PartyInput("SIDE_1", null, ownerPartyType((String) o.get("owner_type_code")),
+            String ownerType = (String) o.get("owner_type_code");
+            String repName = (String) o.get("representative_name");
+            PropertyService.RepresentativeInput rep = repName == null ? null
+                    : new PropertyService.RepresentativeInput(repName, (String) o.get("representative_designation"),
+                            (String) o.get("representative_aadhaar"), (String) o.get("representative_pan"),
+                            (String) o.get("representative_mobile"));
+            out.add(new PartyInput("SIDE_1", null, ownerPartyType(ownerType), ownerType,
                     (String) o.get("owner_name"), (String) o.get("aadhaar_number"), null, null,
-                    (String) o.get("pan"), (String) o.get("address"), null, null, null, null, null, null,
-                    ((Number) o.get("id")).longValue()));
+                    (String) o.get("pan"), (String) o.get("mobile"), (String) o.get("address"),
+                    (String) o.get("registration_no"), rep, null, null, null, ((Number) o.get("id")).longValue()));
         }
-        parties.stream().filter(p -> !"SIDE_1".equals(p.side())).forEach(out::add);
+        parties.stream().filter(p -> !"SIDE_1".equals(p.side()))
+                .map(p -> p.ownerTypeCode() == null ? p : new PartyInput(p.side(), p.role(),
+                        ownerPartyType(p.ownerTypeCode()), p.ownerTypeCode(), p.name(), p.aadhaarNumber(),
+                        p.kartaName(), p.kartaAadhaarNumber(), p.pan(), p.mobile(), p.address(),
+                        p.registrationNo(), p.representative(), p.relationshipCode(), p.extentTransferred(),
+                        p.authorityPoaReference(), null))
+                .forEach(out::add);
         return out;
     }
 
@@ -377,22 +413,45 @@ public class TransactionService {
         return "HUF".equals(ownerTypeCode) ? "HUF" : "INSTITUTION";
     }
 
-    /** Format checks apply only to parties typed in on the transaction, not to existing owner records. */
-    private void validateEnteredParty(PartyInput p) {
-        if (p.name() == null || p.name().isBlank()) {
-            throw ApiException.badRequest("Name is required for every party");
+    /**
+     * Incoming parties share one owner type (the buyer type) and carry the same type-specific fields as
+     * Mint Property owners. Rows copied from existing property owners are not re-validated.
+     */
+    private void validateEnteredParties(String stateCode, Map<String, Object> deedType, List<PartyInput> parties) {
+        List<PartyInput> entered = parties.stream().filter(p -> p.propertyOwnerId() == null).toList();
+        if (entered.isEmpty()) {
+            return;
         }
-        if (p.partyType() == null || p.partyType().isBlank()) {
-            throw ApiException.badRequest("Party type is required for " + p.name());
+        String label = java.util.Objects.requireNonNullElse((String) deedType.get("second_party_label"), "Buyer");
+        java.util.Set<String> types = new java.util.HashSet<>();
+        entered.forEach(p -> types.add(p.ownerTypeCode()));
+        if (types.contains(null)) {
+            throw ApiException.badRequest("Select the " + label.toLowerCase() + " type");
         }
-        validateAadhaar(p.aadhaarNumber());
-        if (p.pan() != null && !p.pan().isBlank() && !PAN.matcher(p.pan()).matches()) {
-            throw ApiException.badRequest("PAN of " + p.name() + " must be in the format ABCDE1234F");
+        if (types.size() > 1) {
+            throw ApiException.badRequest("All " + label.toLowerCase() + "s must have the same "
+                    + label.toLowerCase() + " type");
         }
-        if (p.kartaAadhaarNumber() != null && !p.kartaAadhaarNumber().isBlank()
-                && !AADHAAR.matcher(p.kartaAadhaarNumber()).matches()) {
-            throw ApiException.badRequest("Karta Aadhaar of " + p.name() + " must be exactly 12 digits");
+        String code = types.iterator().next();
+        OwnerType type = OwnerType.fromCode(code)
+                .orElseThrow(() -> ApiException.badRequest("Unknown " + label.toLowerCase() + " type " + code));
+        Boolean multiple = properties.allowsMultipleOwners(stateCode, code);
+        if (multiple == null) {
+            throw ApiException.badRequest(label + " type " + code + " is not configured");
         }
+        if (entered.size() > 1 && !multiple) {
+            throw ApiException.badRequest("Only one " + label.toLowerCase() + " can be recorded for type " + code);
+        }
+        for (int i = 0; i < entered.size(); i++) {
+            PartyInput p = entered.get(i);
+            PropertyService.validateOwnerFields(type.form(), label + " " + (i + 1) + ": ",
+                    new PropertyService.OwnerInput(p.name(), p.aadhaarNumber(), p.pan(), p.mobile(), p.address(),
+                            p.registrationNo(), p.representative()));
+        }
+    }
+
+    private static String twelveDigits(String value) {
+        return value != null && AADHAAR.matcher(value).matches() ? value : null;
     }
 
     @Transactional
@@ -486,12 +545,6 @@ public class TransactionService {
                 "FEE_PAYMENT_PENDING");
         if (!editable.contains(ctx.status())) {
             throw ApiException.conflict("Transaction " + ctx.txnRef() + " is " + ctx.status() + " and cannot be edited");
-        }
-    }
-
-    private void validateAadhaar(String aadhaar) {
-        if (aadhaar == null || aadhaar.isBlank() || !aadhaar.matches("\\d{12}")) {
-            throw ApiException.badRequest("Aadhaar number must be exactly 12 digits");
         }
     }
 

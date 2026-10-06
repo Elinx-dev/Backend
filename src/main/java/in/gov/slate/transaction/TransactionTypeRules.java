@@ -72,7 +72,8 @@ public final class TransactionTypeRules {
             throw ApiException.badRequest("At least one " + second + " must be selected");
         }
         if (Boolean.TRUE.equals(deedType.get("individuals_only"))
-                && parties.stream().anyMatch(p -> !"INDIVIDUAL".equals(p.partyType()))) {
+                && parties.stream().anyMatch(p -> !"INDIVIDUAL".equals(p.partyType())
+                        || (p.ownerTypeCode() != null && !"INDIVIDUAL".equals(p.ownerTypeCode())))) {
             throw ApiException.badRequest(code + " is only allowed between individuals");
         }
         if (Boolean.TRUE.equals(deedType.get("blood_relation_required"))) {

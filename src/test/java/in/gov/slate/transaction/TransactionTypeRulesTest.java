@@ -24,8 +24,8 @@ class TransactionTypeRulesTest {
             "individuals_only", true, "blood_relation_required", true);
 
     private static TransactionService.PartyInput party(String side, String type, String relationship) {
-        return new TransactionService.PartyInput(side, null, type, side + " name", null, null, null, null, null,
-                relationship, null, null, null, null, null, null);
+        return new TransactionService.PartyInput(side, null, type, null, side + " name", null, null, null, null,
+                null, null, null, null, relationship, null, null, null);
     }
 
     @Test
@@ -94,5 +94,14 @@ class TransactionTypeRulesTest {
     @Test
     void legacyDeedTypesSkipPartyChecks() {
         TransactionTypeRules.validateParties(Map.of("code", "SALE_FULL"), List.of(), code -> false);
+    }
+
+    @Test
+    void settlementRejectsANonIndividualBuyerType() {
+        var company = new TransactionService.PartyInput("SIDE_2", null, "INSTITUTION", "PRIVATE_LIMITED_COMPANY",
+                "Adyar Builders Pvt Ltd", null, null, null, null, null, null, null, null, "SON", null, null, null);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> TransactionTypeRules.validateParties(SETTLEMENT,
+                        java.util.List.of(party("SIDE_1", "INDIVIDUAL", null), company), code -> true))
+                .hasMessageContaining("only allowed between individuals");
     }
 }

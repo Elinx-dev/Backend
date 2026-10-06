@@ -26,7 +26,6 @@ import in.gov.slate.config.ConfigService;
 public class ValidationEngine {
 
     private static final Pattern PAN = Pattern.compile("^[A-Z]{5}[0-9]{4}[A-Z]$");
-    private static final BigDecimal HUNDRED = new BigDecimal("100");
     private static final BigDecimal SHARE_EPSILON = new BigDecimal("0.0100");
 
     private final ConfigService config;
@@ -94,14 +93,9 @@ public class ValidationEngine {
         });
 
         predicates.put("sideTotalsReconcile", ctx -> {
-            BigDecimal given = sum(ctx.side("SIDE_1"), "share_transferred_pct");
-            BigDecimal received = sum(ctx.side("SIDE_2"), "share_transferred_pct");
-            if (given.signum() == 0 && received.signum() == 0) {
-                BigDecimal givenExtent = sum(ctx.side("SIDE_1"), "extent_transferred");
-                BigDecimal receivedExtent = sum(ctx.side("SIDE_2"), "extent_transferred");
-                return givenExtent.subtract(receivedExtent).abs().compareTo(SHARE_EPSILON) <= 0;
-            }
-            return given.subtract(received).abs().compareTo(SHARE_EPSILON) <= 0;
+            BigDecimal givenExtent = sum(ctx.side("SIDE_1"), "extent_transferred");
+            BigDecimal receivedExtent = sum(ctx.side("SIDE_2"), "extent_transferred");
+            return givenExtent.subtract(receivedExtent).abs().compareTo(SHARE_EPSILON) <= 0;
         });
 
         predicates.put("guidelineValuePresent", ctx -> {
@@ -145,23 +139,6 @@ public class ValidationEngine {
                     .allMatch(p -> ownerNames.contains(normalise((String) p.get("name"))));
         });
 
-        predicates.put("releasedShareMatchesExisting", ctx -> {
-            for (Map<String, Object> releasor : ctx.side("SIDE_1")) {
-                BigDecimal declared = dec(releasor.get("share_transferred_pct"));
-                BigDecimal recorded = ctx.propertyOwners().stream()
-                        .filter(o -> normalise((String) o.get("owner_name"))
-                                .equals(normalise((String) releasor.get("name"))))
-                        .map(o -> dec(o.get("share_pct")))
-                        .filter(Objects::nonNull)
-                        .findFirst().orElse(null);
-                if (declared == null || recorded == null
-                        || declared.subtract(recorded).abs().compareTo(SHARE_EPSILON) > 0) {
-                    return false;
-                }
-            }
-            return true;
-        });
-
         predicates.put("subparcelCountAtLeastTwo", ctx -> {
             Object count = ctx.transaction().get("resulting_subparcel_count");
             return count != null && ((Number) count).intValue() >= 2;
@@ -181,12 +158,6 @@ public class ValidationEngine {
             return parent.subtract(children).abs().compareTo(tolerance) <= 0;
         });
 
-        predicates.put("sharesAgainstChildParcel", ctx -> {
-            BigDecimal received = sum(ctx.side("SIDE_2"), "share_transferred_pct");
-            return received.compareTo(BigDecimal.ZERO) > 0 && received.compareTo(HUNDRED) <= 0;
-        });
-
-        // Parties copied from an existing property owner are exempt from format rules.
         predicates.put("aadhaarIsTwelveDigits", ctx -> ctx.parties().stream()
                 .filter(p -> p.get("property_owner_id") == null)
                 .allMatch(p -> Boolean.TRUE.equals(p.get("aadhaar_captured"))));
