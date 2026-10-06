@@ -24,7 +24,6 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 /**
@@ -61,6 +60,10 @@ public class PropertyService {
                              RepresentativeInput representative) {
     }
 
+    public record SurveyRecordInput(String ulpin, String surveyNo, String subdivisionNo, BigDecimal extentValue,
+                                    String extentUnit) {
+    }
+
     public record RepresentativeInput(String name, String designation, String aadhaarNumber, String pan,
                                       String mobile) {
     }
@@ -88,9 +91,9 @@ public class PropertyService {
             String landTypeCode,
             String classificationCode,
             String ownerTypeCode,
-            @NotNull @Positive BigDecimal extentValue,
-            @NotBlank String extentUnit,
-            @NotBlank String surveyNo,
+            BigDecimal extentValue,
+            String extentUnit,
+            String surveyNo,
             String subdivisionNo,
             String oldSurveyReference,
             String fmbReferenceNo,
@@ -112,7 +115,8 @@ public class PropertyService {
             ApartmentDetail apartmentDetail,
             List<OwnerInput> owners,
             @NotEmpty @Size(max = MAX_BOUNDARY_MEASUREMENTS) @Valid List<BoundaryMeasurementInput> boundaryMeasurements,
-            @Valid List<ChainOfTitleInput> chainOfTitle) {
+            @Valid List<ChainOfTitleInput> chainOfTitle,
+            List<SurveyRecordInput> surveyRecords) {
     }
 
     public record ApartmentDetail(Long parentLandPropertyId, String flatNo, String blockTower, String floor,
@@ -125,6 +129,10 @@ public class PropertyService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("PROPERTY_CREATE");
         validateOwners(req.ownerTypeCode(), allowsMultipleOwners(user.stateCode(), req.ownerTypeCode()), req.owners());
+        List<SurveyRecordInput> surveys = surveyRecords(req);
+        validateSurveyRecords(surveys);
+        requireUnusedUlpins(user.stateCode(), surveys);
+        SurveyRecordInput primary = surveys.get(0);
         validateBoundaryMeasurements(req.boundaryMeasurements());
         validateChainOfTitle(req.chainOfTitle());
         locations.requireValidPath(user.stateCode(), req.districtCode(), req.sroCode(),
@@ -134,16 +142,16 @@ public class PropertyService {
         var params = new MapSqlParameterSource()
                 .addValue("stateCode", user.stateCode())
                 .addValue("propertyRef", propertyRef)
-                .addValue("ulpin", blankToNull(req.ulpin()))
+                .addValue("ulpin", blankToNull(primary.ulpin()))
                 .addValue("propertyTypeCode", req.propertyTypeCode())
                 .addValue("natureOfTitleCode", req.natureOfTitleCode())
                 .addValue("landTypeCode", req.landTypeCode())
                 .addValue("classificationCode", req.classificationCode())
                 .addValue("ownerTypeCode", req.ownerTypeCode())
-                .addValue("extentValue", req.extentValue())
-                .addValue("extentUnit", req.extentUnit())
-                .addValue("surveyNo", req.surveyNo())
-                .addValue("subdivisionNo", req.subdivisionNo())
+                .addValue("extentValue", primary.extentValue())
+                .addValue("extentUnit", primary.extentUnit())
+                .addValue("surveyNo", primary.surveyNo().trim())
+                .addValue("subdivisionNo", blankToNull(primary.subdivisionNo()))
                 .addValue("oldSurveyReference", req.oldSurveyReference())
                 .addValue("fmbReferenceNo", req.fmbReferenceNo())
                 .addValue("districtCode", req.districtCode())
@@ -196,6 +204,22 @@ public class PropertyService {
                     .addValue("uds", d.udsFraction())
                     .addValue("psn", d.parentSurveyNo())
                     .addValue("psdn", d.parentSubdivisionNo()));
+        }
+
+        for (int index = 0; index < surveys.size(); index++) {
+            SurveyRecordInput survey = surveys.get(index);
+            jdbc.update("""
+                    INSERT INTO core.property_survey (property_id, seq, ulpin, survey_no, subdivision_no,
+                        extent_value, extent_unit)
+                    VALUES (:propertyId, :seq, :ulpin, :surveyNo, :subdivisionNo, :extentValue, :extentUnit)
+                    """, new MapSqlParameterSource()
+                    .addValue("propertyId", id)
+                    .addValue("seq", index + 1)
+                    .addValue("ulpin", blankToNull(survey.ulpin()))
+                    .addValue("surveyNo", survey.surveyNo().trim())
+                    .addValue("subdivisionNo", blankToNull(survey.subdivisionNo()))
+                    .addValue("extentValue", survey.extentValue())
+                    .addValue("extentUnit", survey.extentUnit()));
         }
 
         OwnerType.Form form = OwnerType.fromCode(req.ownerTypeCode()).orElseThrow().form();
@@ -266,7 +290,7 @@ public class PropertyService {
           }
 
         audit.record("PROPERTY_CREATED", "PROPERTY", String.valueOf(id), null, propertyRef,
-                Map.of("propertyRef", propertyRef, "surveyNo", req.surveyNo()), null);
+                Map.of("propertyRef", propertyRef, "surveyNo", primary.surveyNo().trim()), null);
         return get(propertyRef);
     }
 
@@ -291,6 +315,12 @@ public class PropertyService {
                        share_pct, share_note, source, effective_from
                   FROM core.property_owner WHERE property_id = :propertyId AND effective_to IS NULL
                  ORDER BY id
+                """, idParam));
+        property.put("surveyRecords", jdbc.queryForList("""
+                SELECT seq, ulpin, survey_no, subdivision_no, extent_value, extent_unit
+                  FROM core.property_survey
+                 WHERE property_id = :propertyId
+                 ORDER BY seq
                 """, idParam));
               property.put("boundaryMeasurements", jdbc.queryForList("""
                 SELECT seq, from_point, to_point, value, unit
@@ -320,6 +350,58 @@ public class PropertyService {
                     "SELECT * FROM core.property_apartment_detail WHERE property_id = :propertyId", idParam));
         }
         return property;
+    }
+
+    /** Survey records from the request; older clients send a single top-level survey number and extent. */
+    static List<SurveyRecordInput> surveyRecords(CreatePropertyRequest req) {
+        if (req.surveyRecords() != null && !req.surveyRecords().isEmpty()) {
+            return req.surveyRecords();
+        }
+        if (req.surveyNo() == null && req.extentValue() == null) {
+            return List.of();
+        }
+        return List.of(new SurveyRecordInput(req.ulpin(), req.surveyNo(), req.subdivisionNo(), req.extentValue(),
+                req.extentUnit()));
+    }
+
+    static void validateSurveyRecords(List<SurveyRecordInput> surveys) {
+        if (surveys == null || surveys.isEmpty()) {
+            throw ApiException.badRequest("At least one survey record is required");
+        }
+        Set<String> ulpins = new java.util.HashSet<>();
+        for (int index = 0; index < surveys.size(); index++) {
+            SurveyRecordInput survey = surveys.get(index);
+            String prefix = "Survey record " + (index + 1) + ": ";
+            if (survey == null) {
+                throw ApiException.badRequest(prefix + "details are required");
+            }
+            requireText(survey.surveyNo(), prefix + "survey number is required");
+            if (survey.extentValue() == null || survey.extentValue().signum() <= 0) {
+                throw ApiException.badRequest(prefix + "extent must be greater than zero");
+            }
+            requireText(survey.extentUnit(), prefix + "extent unit is required");
+            if (survey.ulpin() != null && !survey.ulpin().isBlank() && !ulpins.add(survey.ulpin().trim())) {
+                throw ApiException.badRequest(prefix + "ULPIN " + survey.ulpin().trim() + " is repeated");
+            }
+        }
+    }
+
+    private void requireUnusedUlpins(String stateCode, List<SurveyRecordInput> surveys) {
+        List<String> ulpins = surveys.stream().map(SurveyRecordInput::ulpin)
+                .filter(ulpin -> ulpin != null && !ulpin.isBlank()).map(String::trim).toList();
+        if (ulpins.isEmpty()) {
+            return;
+        }
+        List<String> taken = jdbc.queryForList("""
+                SELECT s.ulpin FROM core.property_survey s JOIN core.property p ON p.id = s.property_id
+                 WHERE p.state_code = :stateCode AND s.ulpin IN (:ulpins)
+                UNION
+                SELECT ulpin FROM core.property WHERE state_code = :stateCode AND ulpin IN (:ulpins)
+                """, new MapSqlParameterSource().addValue("stateCode", stateCode).addValue("ulpins", ulpins),
+                String.class);
+        if (!taken.isEmpty()) {
+            throw ApiException.badRequest("ULPIN already recorded for another property: " + String.join(", ", taken));
+        }
     }
 
     /** Reads cfg.option_value.attributes.allowMultipleOwners for the owner type; null if not configured. */

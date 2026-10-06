@@ -207,4 +207,22 @@ class PropertyServiceTest {
         assertThatThrownBy(() -> PropertyService.validateOwners("ALIEN", true, List.of(society)))
                 .isInstanceOf(ApiException.class).hasMessageContaining("owner type");
     }
+
+    @Test
+    void surveyRecordsNeedSurveyNumberExtentAndUniqueUlpin() {
+        var first = new PropertyService.SurveyRecordInput("TN12345678901", "45", "2A", new java.math.BigDecimal("1200"),
+                "SQ_FT");
+        var second = new PropertyService.SurveyRecordInput(null, "46", null, new java.math.BigDecimal("0.5"), "ACRE");
+        assertThatCode(() -> PropertyService.validateSurveyRecords(List.of(first, second))).doesNotThrowAnyException();
+
+        assertThatThrownBy(() -> PropertyService.validateSurveyRecords(List.of()))
+                .isInstanceOf(ApiException.class).hasMessageContaining("survey record");
+        var noExtent = new PropertyService.SurveyRecordInput(null, "47", null, null, "SQ_FT");
+        assertThatThrownBy(() -> PropertyService.validateSurveyRecords(List.of(first, noExtent)))
+                .isInstanceOf(ApiException.class).hasMessageContaining("Survey record 2: extent");
+        var repeated = new PropertyService.SurveyRecordInput("TN12345678901", "48", null, java.math.BigDecimal.TEN,
+                "SQ_FT");
+        assertThatThrownBy(() -> PropertyService.validateSurveyRecords(List.of(first, repeated)))
+                .isInstanceOf(ApiException.class).hasMessageContaining("repeated");
+    }
 }
