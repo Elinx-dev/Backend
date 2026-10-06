@@ -23,6 +23,9 @@ import jakarta.validation.constraints.NotBlank;
 @Service
 public class TransactionService {
 
+    private static final java.util.regex.Pattern AADHAAR = java.util.regex.Pattern.compile("\\d{12}");
+    private static final java.util.regex.Pattern PAN = java.util.regex.Pattern.compile("[A-Z]{5}[0-9]{4}[A-Z]");
+
     private final NamedParameterJdbcTemplate jdbc;
     private final ConfigService config;
     private final TransactionRepository repository;
@@ -55,7 +58,9 @@ public class TransactionService {
                                 BigDecimal extentOrShareTransferred, String extentUnit,
                                 String relationshipCategory, String basisOfSettlement,
                                 BigDecimal shareBeingReleased, Integer resultingSubparcelCount,
-                                BigDecimal guidelineValue, String guidelineValueReference) {
+                                BigDecimal guidelineValue, String guidelineValueReference,
+                                Boolean subdivisionRequired, Boolean surveyRequiredByParty,
+                                Long surveyorUserId, String surveyLocationType) {
     }
 
     public record DetailsRequest(BigDecimal declaredConsideration, String modeOfConsideration,
@@ -65,11 +70,15 @@ public class TransactionService {
                                  BigDecimal guidelineValue, String guidelineValueReference, String remarks) {
     }
 
-    public record PartyInput(@NotBlank String side, String role, @NotBlank String partyType, @NotBlank String name,
+    /**
+     * A SIDE_1 party is always a current property owner, referenced by {@code propertyOwnerId};
+     * its details are read from the property record, not from the request.
+     */
+    public record PartyInput(@NotBlank String side, String role, String partyType, String name,
                              String aadhaarNumber, String kartaName, String kartaAadhaarNumber, String pan,
                              String address, String relationshipCode, BigDecimal existingSharePct,
                              BigDecimal shareTransferredPct, BigDecimal extentTransferred,
-                             BigDecimal resultingSharePct, String authorityPoaReference) {
+                             BigDecimal resultingSharePct, String authorityPoaReference, Long propertyOwnerId) {
     }
 
     public record WitnessInput(@NotBlank String name, String address, String idProofType, String idProofRef) {
@@ -81,7 +90,7 @@ public class TransactionService {
         user.requirePermission("TXN_CREATE");
 
         var propertyRows = jdbc.queryForList(
-                "SELECT id, property_ref, sro_code, district_code FROM core.property WHERE property_ref = :ref AND state_code = :state",
+                "SELECT id, property_ref, sro_code, district_code, owner_type_code FROM core.property WHERE property_ref = :ref AND state_code = :state",
                 new MapSqlParameterSource().addValue("ref", req.propertyRef()).addValue("state", user.stateCode()));
         if (propertyRows.isEmpty()) {
             throw ApiException.notFound("Property " + req.propertyRef());
@@ -89,8 +98,35 @@ public class TransactionService {
         Map<String, Object> property = propertyRows.get(0);
 
         Map<String, Object> deedType = config.deedType(user.stateCode(), req.deedTypeCode());
-        String transferScope = resolveTransferScope(req.deedTypeCode(), req.subtype(), req.transferScope());
-        boolean surveyRequired = SurveyRequirement.derive((String) deedType.get("survey_rule"), transferScope);
+        String transferScope;
+        boolean surveyRequired;
+        boolean subdivisionRequired = false;
+        boolean surveyRequiredByParty = false;
+        String relationshipCategory = req.relationshipCategory();
+        Long surveyorUserId = null;
+        String surveyLocationType = null;
+        if (config.isConfiguredTransactionType(user.stateCode(), req.deedTypeCode())) {
+            Map<String, Object> transactionType = config.transactionType(user.stateCode(), req.deedTypeCode());
+            if (transactionType == null) {
+                throw ApiException.badRequest("Transaction type " + req.deedTypeCode() + " is not active");
+            }
+            var decision = TransactionTypeRules.decide(transactionType, req.subdivisionRequired(),
+                    req.surveyRequiredByParty(), req.transferScope(), (String) property.get("owner_type_code"));
+            transferScope = decision.transferScope();
+            surveyRequired = decision.surveyRequired();
+            subdivisionRequired = decision.subdivisionRequired();
+            surveyRequiredByParty = decision.surveyRequiredByParty();
+            if (Boolean.TRUE.equals(transactionType.get("blood_relation_required"))) {
+                relationshipCategory = "FAMILY";
+            }
+            if (surveyRequired) {
+                surveyorUserId = requireSurveyor(user.stateCode(), req.surveyorUserId());
+                surveyLocationType = requireSurveyLocation(user.stateCode(), req.surveyLocationType());
+            }
+        } else {
+            transferScope = resolveTransferScope(req.deedTypeCode(), req.subtype(), req.transferScope());
+            surveyRequired = SurveyRequirement.derive((String) deedType.get("survey_rule"), transferScope);
+        }
 
         Map<String, Object> wf = config.workflow(user.stateCode(), req.deedTypeCode());
         String txnRef = numbering.next(user.stateCode(), "TXN_REF", (String) property.get("district_code"));
@@ -111,14 +147,18 @@ public class TransactionService {
                 .addValue("modeOfConsideration", req.modeOfConsideration())
                 .addValue("extentOrShareTransferred", req.extentOrShareTransferred())
                 .addValue("extentUnit", req.extentUnit())
-                .addValue("relationshipCategory", req.relationshipCategory())
+                .addValue("relationshipCategory", relationshipCategory)
                 .addValue("basisOfSettlement", req.basisOfSettlement())
                 .addValue("shareBeingReleased", req.shareBeingReleased())
                 .addValue("resultingSubparcelCount", req.resultingSubparcelCount())
                 .addValue("guidelineValue", req.guidelineValue())
                 .addValue("guidelineValueReference", req.guidelineValueReference())
                 .addValue("idempotencyKey", UUID.randomUUID())
-                .addValue("initiatedBy", user.id());
+                .addValue("initiatedBy", user.id())
+                .addValue("subdivisionRequired", subdivisionRequired)
+                .addValue("surveyRequiredByParty", surveyRequiredByParty)
+                .addValue("surveyorUserId", surveyorUserId)
+                .addValue("surveyLocationType", surveyLocationType);
 
         jdbc.update("""
                 INSERT INTO core.transaction (state_code, txn_ref, property_id, deed_type_code, subtype,
@@ -126,18 +166,49 @@ public class TransactionService {
                     sro_code, remarks, declared_consideration, mode_of_consideration,
                     extent_or_share_transferred, extent_unit, relationship_category, basis_of_settlement,
                     share_being_released, resulting_subparcel_count, guideline_value,
-                    guideline_value_reference, idempotency_key, initiated_by)
+                    guideline_value_reference, idempotency_key, initiated_by,
+                    subdivision_required, survey_required_by_party, assigned_surveyor_id, survey_location_type)
                 VALUES (:stateCode, :txnRef, :propertyId, :deedTypeCode, :subtype,
                     :workflowId, :configVersion, :transferScope, :surveyRequired, 'DRAFT', 'PROPERTY_IDENTIFICATION',
                     :sroCode, :remarks, :declaredConsideration, :modeOfConsideration,
                     :extentOrShareTransferred, :extentUnit, :relationshipCategory, :basisOfSettlement,
                     :shareBeingReleased, :resultingSubparcelCount, :guidelineValue,
-                    :guidelineValueReference, :idempotencyKey, :initiatedBy)
+                    :guidelineValueReference, :idempotencyKey, :initiatedBy,
+                    :subdivisionRequired, :surveyRequiredByParty, :surveyorUserId, :surveyLocationType)
                 """, params);
 
         audit.record("TRANSACTION_CREATED", "TRANSACTION", txnRef, txnRef, (String) property.get("property_ref"),
-                Map.of("deedType", req.deedTypeCode(), "surveyRequired", surveyRequired), null);
+                Map.of("deedType", req.deedTypeCode(), "surveyRequired", surveyRequired,
+                        "subdivisionRequired", subdivisionRequired, "surveyRequiredByParty", surveyRequiredByParty),
+                null);
         return detail(txnRef);
+    }
+
+    public List<Map<String, Object>> surveyors() {
+        CurrentUser user = CurrentUser.require();
+        return config.surveyors(user.stateCode());
+    }
+
+    private long requireSurveyor(String stateCode, Long surveyorUserId) {
+        if (surveyorUserId == null) {
+            throw ApiException.badRequest("Select a surveyor; this transaction needs a survey");
+        }
+        boolean known = config.surveyors(stateCode).stream()
+                .anyMatch(s -> surveyorUserId.equals(((Number) s.get("id")).longValue()));
+        if (!known) {
+            throw ApiException.badRequest("User " + surveyorUserId + " is not an active surveyor");
+        }
+        return surveyorUserId;
+    }
+
+    private String requireSurveyLocation(String stateCode, String locationType) {
+        if (locationType == null || locationType.isBlank()) {
+            throw ApiException.badRequest("Select the survey location type so the survey fee can be applied");
+        }
+        if (config.surveyFee(stateCode, locationType) == null) {
+            throw ApiException.badRequest("No active survey fee for location type " + locationType);
+        }
+        return locationType;
     }
 
     /**
@@ -209,13 +280,18 @@ public class TransactionService {
         if (!ctx.consents().isEmpty()) {
             throw ApiException.conflict("Parties cannot be replaced after consent has been requested");
         }
+        List<PartyInput> resolved = resolveParties(ctx, parties);
+        TransactionTypeRules.validateParties(ctx.deedType(), resolved,
+                code -> config.isActiveBloodRelation(user.stateCode(), code));
+        resolved.stream().filter(p -> p.propertyOwnerId() == null).forEach(this::validateEnteredParty);
 
         jdbc.update("DELETE FROM core.transaction_party WHERE transaction_id = :id",
                 new MapSqlParameterSource("id", ctx.id()));
 
         Map<String, Integer> seqBySide = new LinkedHashMap<>();
-        for (PartyInput p : parties) {
-            validateAadhaar(p.aadhaarNumber());
+        for (PartyInput p : resolved) {
+            String aadhaar = p.aadhaarNumber() != null && AADHAAR.matcher(p.aadhaarNumber()).matches()
+                    ? p.aadhaarNumber() : null;
             int seq = seqBySide.merge(p.side(), 1, Integer::sum);
             String defaultRole = "SIDE_1".equals(p.side())
                     ? (String) ctx.deedType().get("side1_role")
@@ -224,11 +300,11 @@ public class TransactionService {
                     INSERT INTO core.transaction_party (transaction_id, side, role, seq, party_type, name,
                         aadhaar_hash, aadhaar_last4, aadhaar_salt_ref, karta_name, karta_aadhaar_hash, pan, address,
                         relationship_code, existing_share_pct, share_transferred_pct, extent_transferred,
-                        resulting_share_pct, authority_poa_reference)
+                        resulting_share_pct, authority_poa_reference, property_owner_id)
                     VALUES (:txnId, :side, :role, :seq, :partyType, :name,
                         :aadhaarHash, :last4, :saltRef, :kartaName, :kartaHash, :pan, :address,
                         :relationshipCode, :existingShare, :shareTransferred, :extentTransferred,
-                        :resultingShare, :authorityRef)
+                        :resultingShare, :authorityRef, :propertyOwnerId)
                     """, new MapSqlParameterSource()
                     .addValue("txnId", ctx.id())
                     .addValue("side", p.side())
@@ -236,9 +312,9 @@ public class TransactionService {
                     .addValue("seq", seq)
                     .addValue("partyType", p.partyType())
                     .addValue("name", p.name())
-                    .addValue("aadhaarHash", hashAadhaar(p.aadhaarNumber()))
-                    .addValue("last4", last4(p.aadhaarNumber()))
-                    .addValue("saltRef", p.aadhaarNumber() == null ? null : aadhaarSaltRef)
+                    .addValue("aadhaarHash", hashAadhaar(aadhaar))
+                    .addValue("last4", last4(aadhaar))
+                    .addValue("saltRef", aadhaar == null ? null : aadhaarSaltRef)
                     .addValue("kartaName", p.kartaName())
                     .addValue("kartaHash", hashAadhaar(p.kartaAadhaarNumber()))
                     .addValue("pan", p.pan())
@@ -248,14 +324,75 @@ public class TransactionService {
                     .addValue("shareTransferred", p.shareTransferredPct())
                     .addValue("extentTransferred", p.extentTransferred())
                     .addValue("resultingShare", p.resultingSharePct())
-                    .addValue("authorityRef", p.authorityPoaReference()));
+                    .addValue("authorityRef", p.authorityPoaReference())
+                    .addValue("propertyOwnerId", p.propertyOwnerId()));
         }
 
         TransactionContext updated = repository.load(txnRef, user.stateCode());
         validation.evaluate(updated, "PARTY", true);
         audit.record("PARTIES_SAVED", "TRANSACTION", String.valueOf(ctx.id()), txnRef, ctx.propertyRef(),
-                Map.of("partyCount", parties.size()), null);
+                Map.of("partyCount", resolved.size()), null);
         return detail(txnRef);
+    }
+
+    /**
+     * First-party rows come from the property's current owners (all of them, or the ones
+     * referenced by propertyOwnerId); second-party rows are taken as entered.
+     */
+    private List<PartyInput> resolveParties(TransactionContext ctx, List<PartyInput> parties) {
+        List<Map<String, Object>> owners = jdbc.queryForList("""
+                SELECT id, owner_type_code, owner_name, aadhaar_number, pan, address
+                  FROM core.property_owner
+                 WHERE property_id = :propertyId AND effective_to IS NULL
+                 ORDER BY id
+                """, new MapSqlParameterSource("propertyId", ctx.transaction().get("property_id")));
+        java.util.Set<Long> selected = parties.stream()
+                .filter(p -> "SIDE_1".equals(p.side()) && p.propertyOwnerId() != null)
+                .map(PartyInput::propertyOwnerId)
+                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+        List<Map<String, Object>> chosen = selected.isEmpty() ? owners : owners.stream()
+                .filter(o -> selected.contains(((Number) o.get("id")).longValue()))
+                .toList();
+        if (chosen.size() != selected.size() && !selected.isEmpty()) {
+            throw ApiException.badRequest("Selected owner is not a current owner of property " + ctx.propertyRef());
+        }
+        if (chosen.isEmpty()) {
+            throw ApiException.badRequest("Property " + ctx.propertyRef() + " has no recorded owners");
+        }
+        List<PartyInput> out = new java.util.ArrayList<>();
+        for (Map<String, Object> o : chosen) {
+            out.add(new PartyInput("SIDE_1", null, ownerPartyType((String) o.get("owner_type_code")),
+                    (String) o.get("owner_name"), (String) o.get("aadhaar_number"), null, null,
+                    (String) o.get("pan"), (String) o.get("address"), null, null, null, null, null, null,
+                    ((Number) o.get("id")).longValue()));
+        }
+        parties.stream().filter(p -> !"SIDE_1".equals(p.side())).forEach(out::add);
+        return out;
+    }
+
+    private static String ownerPartyType(String ownerTypeCode) {
+        if (ownerTypeCode == null || "INDIVIDUAL".equals(ownerTypeCode) || "SOLE_PROPRIETORSHIP".equals(ownerTypeCode)) {
+            return "INDIVIDUAL";
+        }
+        return "HUF".equals(ownerTypeCode) ? "HUF" : "INSTITUTION";
+    }
+
+    /** Format checks apply only to parties typed in on the transaction, not to existing owner records. */
+    private void validateEnteredParty(PartyInput p) {
+        if (p.name() == null || p.name().isBlank()) {
+            throw ApiException.badRequest("Name is required for every party");
+        }
+        if (p.partyType() == null || p.partyType().isBlank()) {
+            throw ApiException.badRequest("Party type is required for " + p.name());
+        }
+        validateAadhaar(p.aadhaarNumber());
+        if (p.pan() != null && !p.pan().isBlank() && !PAN.matcher(p.pan()).matches()) {
+            throw ApiException.badRequest("PAN of " + p.name() + " must be in the format ABCDE1234F");
+        }
+        if (p.kartaAadhaarNumber() != null && !p.kartaAadhaarNumber().isBlank()
+                && !AADHAAR.matcher(p.kartaAadhaarNumber()).matches()) {
+            throw ApiException.badRequest("Karta Aadhaar of " + p.name() + " must be exactly 12 digits");
+        }
     }
 
     @Transactional
@@ -307,6 +444,13 @@ public class TransactionService {
         out.put("payments", ctx.payments());
         out.put("registeredOwners", ctx.propertyOwners());
         out.put("surveyParcels", ctx.surveyParcels());
+        Object surveyorId = ctx.transaction().get("assigned_surveyor_id");
+        out.put("assignedSurveyor", surveyorId == null ? null : config.surveyors(user.stateCode()).stream()
+                .filter(s -> ((Number) s.get("id")).longValue() == ((Number) surveyorId).longValue())
+                .findFirst().orElse(null));
+        Object locationType = ctx.transaction().get("survey_location_type");
+        out.put("surveyFeeConfig", locationType == null ? null
+                : config.surveyFee(user.stateCode(), (String) locationType));
         out.put("availableActions", workflow.availableActions(ctx, user));
         out.put("validation", validation.evaluate(ctx, "TRANSACTION", false));
         out.put("stages", config.workflow(user.stateCode(), ctx.deedTypeCode()).get("stages"));

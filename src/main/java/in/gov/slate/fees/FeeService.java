@@ -152,7 +152,8 @@ public class FeeService {
         }
 
         BigDecimal otherCharges = otherCharges(feeMaster);
-        BigDecimal total = stampDuty.add(registrationFee).add(tds).add(otherCharges);
+        BigDecimal surveyFee = surveyFee(ctx);
+        BigDecimal total = stampDuty.add(registrationFee).add(tds).add(otherCharges).add(surveyFee);
 
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("guideline", guideline);
@@ -161,13 +162,15 @@ public class FeeService {
         input.put("relationshipCategory", relationshipCategory);
         input.put("feeMasterId", feeMaster.get("id"));
         input.put("gazetteReference", feeMaster.get("gazette_reference"));
+        input.put("surveyLocationType", ctx.transaction().get("survey_location_type"));
+        input.put("surveyFee", surveyFee);
 
         jdbc.update("""
                 INSERT INTO core.fee_calculation (transaction_id, fee_master_id, fee_master_version,
                     valuation_basis_used, valuation_amount, stamp_duty, registration_fee, tds_amount,
-                    other_charges, total_payable, calculation_input_json)
+                    other_charges, survey_fee, total_payable, calculation_input_json)
                 VALUES (:txnId, :feeMasterId, :version, :basis, :valuation, :stampDuty, :registrationFee,
-                    :tds, :otherCharges, :total, cast(:input AS jsonb))
+                    :tds, :otherCharges, :surveyFee, :total, cast(:input AS jsonb))
                 """, new MapSqlParameterSource()
                 .addValue("txnId", ctx.id())
                 .addValue("feeMasterId", feeMaster.get("id"))
@@ -178,6 +181,7 @@ public class FeeService {
                 .addValue("registrationFee", registrationFee)
                 .addValue("tds", tds)
                 .addValue("otherCharges", otherCharges)
+                .addValue("surveyFee", surveyFee)
                 .addValue("total", total)
                 .addValue("input", json(input)));
 
@@ -199,6 +203,7 @@ public class FeeService {
         out.put("registrationFee", registrationFee);
         out.put("tdsAmount", tds);
         out.put("otherCharges", otherCharges);
+        out.put("surveyFee", surveyFee);
         out.put("totalPayable", total);
         return out;
     }
@@ -223,6 +228,25 @@ public class FeeService {
                     + (relationshipCategory == null ? "" : " / " + relationshipCategory));
         }
         return rows.get(0);
+    }
+
+    /** Survey fee from the Survey Fee Master, charged only when the transaction needs a survey. */
+    private BigDecimal surveyFee(TransactionContext ctx) {
+        String locationType = (String) ctx.transaction().get("survey_location_type");
+        if (!ctx.surveyRequired() || locationType == null) {
+            return BigDecimal.ZERO;
+        }
+        List<BigDecimal> fees = jdbc.queryForList("""
+                SELECT fee FROM master.survey_fee
+                 WHERE state_code IN (:stateCode, '*') AND location_type = :locationType AND status = 'ACTIVE'
+                 ORDER BY (state_code = '*') LIMIT 1
+                """, new MapSqlParameterSource()
+                .addValue("stateCode", ctx.transaction().get("state_code"))
+                .addValue("locationType", locationType), BigDecimal.class);
+        if (fees.isEmpty()) {
+            throw ApiException.notFound("Active survey fee for location type " + locationType);
+        }
+        return fees.get(0).setScale(2, RoundingMode.HALF_UP);
     }
 
     private BigDecimal charge(BigDecimal valuation, Map<String, Object> feeMaster, String rateKey, String flatKey,

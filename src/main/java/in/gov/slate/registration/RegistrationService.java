@@ -163,10 +163,17 @@ public class RegistrationService {
     }
 
     private String mutationType(TransactionContext ctx) {
+        if (Boolean.TRUE.equals(ctx.transaction().get("subdivision_required"))) {
+            return "SUBDIVISION";
+        }
         return switch (ctx.deedTypeCode()) {
+            case "SALE" -> "UNDIVIDED_SHARE".equals(ctx.transferScope()) ? "UNDIVIDED_SHARE" : "FULL_PROPERTY_TRANSFER";
+            case "RELEASE" -> "RELEASE_RELINQUISHMENT";
+            case "PARTITION" -> "PHYSICAL_PARTIAL_EXTENT_SUBDIVISION".equals(ctx.transferScope())
+                    ? "SUBDIVISION" : "OTHER";
             case "SALE_FULL" -> "FULL_PROPERTY_TRANSFER";
             case "SALE_UNDIVIDED_SHARE" -> "UNDIVIDED_SHARE";
-            case "SALE_PARTIAL_SUBDIVISION", "PARTITION" -> "SUBDIVISION";
+            case "SALE_PARTIAL_SUBDIVISION" -> "SUBDIVISION";
             case "GIFT", "SETTLEMENT" -> "GIFT_SETTLEMENT_TRANSFER";
             case "RELEASE_RELINQUISHMENT" -> "RELEASE_RELINQUISHMENT";
             default -> "OTHER";

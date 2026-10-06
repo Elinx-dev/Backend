@@ -68,7 +68,8 @@ public class SurveyService {
     }
 
     public record ParcelInput(@NotNull BigDecimal extentValue, String extentUnit,
-                              List<OwnerShare> owners, Map<String, Object> geometryGeoJson) {
+                              List<OwnerShare> owners, Map<String, Object> geometryGeoJson,
+                              String officialSubdivisionNo) {
     }
 
     public record OwnerShare(String name, BigDecimal sharePct) {
@@ -94,6 +95,7 @@ public class SurveyService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("SURVEY_SCHEDULE");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
+        requireAssignedSurveyor(ctx, user);
         String role = req.role() != null ? req.role() : (user.hasRole("VAO") ? "VAO" : "SURVEYOR");
 
         var existing = jdbc.queryForList("""
@@ -175,6 +177,7 @@ public class SurveyService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("SURVEY_SUBMIT");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
+        requireAssignedSurveyor(ctx, user);
         if (!"SURVEY_PENDING".equals(ctx.status())) {
             throw ApiException.conflict("Survey can only be submitted while the transaction is SURVEY_PENDING");
         }
@@ -262,7 +265,26 @@ public class SurveyService {
         return out;
     }
 
+    /** When a surveyor was assigned at initiation, only that surveyor may act as SURVEYOR. */
+    private void requireAssignedSurveyor(TransactionContext ctx, CurrentUser user) {
+        Object assigned = ctx.transaction().get("assigned_surveyor_id");
+        if (assigned != null && user.hasRole("SURVEYOR") && !user.hasRole("VAO")
+                && ((Number) assigned).longValue() != user.id()) {
+            throw ApiException.forbidden("This survey is assigned to another surveyor");
+        }
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
     private String surveyPurpose(TransactionContext ctx) {
+        if (Boolean.TRUE.equals(ctx.transaction().get("subdivision_required"))) {
+            return ctx.deedTypeCode() + "_SUBDIVISION";
+        }
+        if (Boolean.TRUE.equals(ctx.transaction().get("survey_required_by_party"))) {
+            return "PARTY_REQUESTED_SURVEY";
+        }
         return switch (ctx.deedTypeCode()) {
             case "PARTITION" -> "PARTITION_SUBDIVISION";
             case "SALE_PARTIAL_SUBDIVISION" -> "SALE_SUBDIVISION";
@@ -336,7 +358,7 @@ public class SurveyService {
                         guideline_value, guideline_value_reference, parent_property_id, created_by)
                     SELECT p.state_code, :childRef, p.property_type_code, 'PARTITION', p.land_type_code,
                            p.classification_code, :extent, :extentUnit, p.survey_no,
-                           coalesce(p.subdivision_no,'') || '-' || :seq, p.subdivision_no, p.district_code,
+                           :officialSubdivisionNo, p.subdivision_no, p.district_code,
                            p.taluk_code, p.village_code, p.sro_code, p.street, p.door_no, p.guideline_value,
                            p.guideline_value_reference, p.id, :userId
                       FROM core.property p WHERE p.id = :parentId
@@ -345,7 +367,7 @@ public class SurveyService {
                     .addValue("extent", parcel.extentValue())
                     .addValue("extentUnit", parcel.extentUnit() != null ? parcel.extentUnit()
                             : ctx.property().get("extent_unit"))
-                    .addValue("seq", String.valueOf(seq))
+                    .addValue("officialSubdivisionNo", blankToNull(parcel.officialSubdivisionNo()))
                     .addValue("parentId", parentPropertyId)
                     .addValue("userId", CurrentUser.require().id()), keyHolder, new String[]{"id"});
             long childPropertyId = keyHolder.getKey().longValue();
@@ -368,9 +390,9 @@ public class SurveyService {
 
             jdbc.update("""
                     INSERT INTO survey.resulting_parcel (submission_id, seq, extent_value, extent_unit,
-                        intended_owner_mapping, child_property_id, geometry_geojson)
+                        intended_owner_mapping, child_property_id, geometry_geojson, official_subdivision_no)
                     VALUES (:submissionId, :seq, :extent, :extentUnit, cast(:owners AS jsonb), :childPropertyId,
-                        cast(:geometry AS jsonb))
+                        cast(:geometry AS jsonb), :officialSubdivisionNo)
                     """, new MapSqlParameterSource()
                     .addValue("submissionId", submissionId)
                     .addValue("seq", seq)
@@ -379,6 +401,7 @@ public class SurveyService {
                             : ctx.property().get("extent_unit"))
                     .addValue("owners", json(parcel.owners() == null ? List.of() : parcel.owners()))
                     .addValue("childPropertyId", childPropertyId)
+                    .addValue("officialSubdivisionNo", blankToNull(parcel.officialSubdivisionNo()))
                     .addValue("geometry", parcel.geometryGeoJson() == null ? null : json(parcel.geometryGeoJson())));
 
             children.add(new TokenService.ChildParcel(childRef, childPropertyId, owners));

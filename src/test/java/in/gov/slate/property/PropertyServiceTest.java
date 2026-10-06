@@ -1,6 +1,8 @@
 package in.gov.slate.property;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -20,6 +22,7 @@ import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import in.gov.slate.common.ApiException;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.common.NumberingService;
@@ -122,5 +125,104 @@ class PropertyServiceTest {
             "nature_of_transaction", "SALE_FULL",
             "reference_no", "REG-42",
             "survey_no", "15")));
+    }
+
+    private static PropertyService.OwnerInput individual(String name, String mobile) {
+        return new PropertyService.OwnerInput(name, "123412341234", "ABCDE1234F", mobile, "12 Main Road, Adyar",
+                null, null);
+    }
+
+    @Test
+    void acceptsIndividualOwnerWithMobile() {
+        assertThatCode(() -> PropertyService.validateOwners("INDIVIDUAL", true,
+                List.of(individual("R. Kumar", "9876543210")))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsIndividualOwnerWithoutMobile() {
+        assertThatThrownBy(() -> PropertyService.validateOwners("INDIVIDUAL", true,
+                List.of(individual("R. Kumar", null))))
+                .isInstanceOf(ApiException.class).hasMessageContaining("mobile");
+    }
+
+    @Test
+    void multipleOwnersOnlyWhenOwnerTypeAllowsIt() {
+        var owners = List.of(individual("R. Kumar", "9876543210"), individual("S. Kumar", "9876543211"));
+        assertThatCode(() -> PropertyService.validateOwners("INDIVIDUAL", true, owners)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> PropertyService.validateOwners("SOCIETY", false, owners))
+                .isInstanceOf(ApiException.class).hasMessageContaining("Only one owner");
+    }
+
+    @Test
+    void ownerTypeMustBeConfigured() {
+        var owners = List.of(individual("R. Kumar", "9876543210"));
+        assertThatThrownBy(() -> PropertyService.validateOwners("INDIVIDUAL", null, owners))
+                .isInstanceOf(ApiException.class).hasMessageContaining("owner type");
+        assertThatThrownBy(() -> PropertyService.validateOwners(null, true, owners))
+                .isInstanceOf(ApiException.class).hasMessageContaining("owner type");
+    }
+
+    @Test
+    void companyOwnerRequiresValidCinAndAuthorisedSignatory() {
+        var signatory = new PropertyService.RepresentativeInput("S. Rao", "Director", "123412341234",
+                "ABCDE1234F", "9876543210");
+        var company = new PropertyService.OwnerInput("Acme Pvt Ltd", null, "AAACA1234C",
+                null, "Guindy, Chennai", "U72900TN2010PTC123456", signatory);
+        assertThatCode(() -> PropertyService.validateOwners("PRIVATE_LIMITED_COMPANY", false, List.of(company)))
+                .doesNotThrowAnyException();
+
+        var badCin = new PropertyService.OwnerInput("Acme Pvt Ltd", null, "AAACA1234C",
+                null, "Guindy, Chennai", "12345", signatory);
+        assertThatThrownBy(() -> PropertyService.validateOwners("PRIVATE_LIMITED_COMPANY", false, List.of(badCin)))
+                .isInstanceOf(ApiException.class).hasMessageContaining("CIN");
+
+        var noSignatory = new PropertyService.OwnerInput("Acme Ltd", null, "AAACA1234C",
+                null, "Guindy, Chennai", "L72900TN2010PLC123456", null);
+        assertThatThrownBy(() -> PropertyService.validateOwners("PUBLIC_LIMITED_COMPANY", false, List.of(noSignatory)))
+                .isInstanceOf(ApiException.class).hasMessageContaining("authorised signatory");
+    }
+
+    @Test
+    void hufOwnerRequiresKartaWithoutMobile() {
+        var karta = new PropertyService.RepresentativeInput("V. Iyer", null, "123412341234", "ABCDE1234F", null);
+        var huf = new PropertyService.OwnerInput("Iyer HUF", null, "AAAHI1234H", null, "Mylapore", null, karta);
+        assertThatCode(() -> PropertyService.validateOwners("HUF", false, List.of(huf))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void llpOwnerRequiresLlpin() {
+        var partner = new PropertyService.RepresentativeInput("P. Das", null, "123412341234", "ABCDE1234F",
+                "9876543210");
+        var llp = new PropertyService.OwnerInput("Das LLP", null, "AAAFD1234L", null, "T Nagar", "AAB1234", partner);
+        assertThatThrownBy(() -> PropertyService.validateOwners("LLP", false, List.of(llp)))
+                .isInstanceOf(ApiException.class).hasMessageContaining("LLPIN");
+    }
+
+    @Test
+    void unspecifiedOwnerTypesUseDefaultFields() {
+        var society = new PropertyService.OwnerInput("Adyar Co-op Society", "123412341234", "AAAAS1234S",
+                "9876543210", "Adyar", null, null);
+        assertThatCode(() -> PropertyService.validateOwners("SOCIETY", false, List.of(society)))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> PropertyService.validateOwners("ALIEN", true, List.of(society)))
+                .isInstanceOf(ApiException.class).hasMessageContaining("owner type");
+    }
+
+    @Test
+    void surveyRecordsNeedSurveyNumberExtentAndUniqueUlpin() {
+        var first = new PropertyService.SurveyRecordInput("TN12345678901", "45", "2A", new java.math.BigDecimal("1200"),
+                "SQ_FT");
+        var second = new PropertyService.SurveyRecordInput(null, "46", null, new java.math.BigDecimal("0.5"), "ACRE");
+        assertThatCode(() -> PropertyService.validateSurveyRecords(List.of(first, second))).doesNotThrowAnyException();
+
+        assertThatThrownBy(() -> PropertyService.validateSurveyRecords(List.of()))
+                .isInstanceOf(ApiException.class).hasMessageContaining("survey record");
+        var noExtent = new PropertyService.SurveyRecordInput(null, "47", null, null, "SQ_FT");
+        assertThatThrownBy(() -> PropertyService.validateSurveyRecords(List.of(first, noExtent)))
+                .isInstanceOf(ApiException.class).hasMessageContaining("Survey record 2: extent");
+        var repeated = new PropertyService.SurveyRecordInput("TN12345678901", "48", null, java.math.BigDecimal.TEN,
+                "SQ_FT");
+        assertThatThrownBy(() -> PropertyService.validateSurveyRecords(List.of(first, repeated)))
+                .isInstanceOf(ApiException.class).hasMessageContaining("repeated");
     }
 }
