@@ -60,6 +60,8 @@ slate:
     salt-ref: ${SLATE_AADHAAR_SALT_REF:local-demo-v1}
   survey:
     tolerance-pct: ${SLATE_SURVEY_TOLERANCE_PCT:1.0}
+  vao:
+    visit-slots: ${SLATE_VAO_VISIT_SLOTS:09:00,10:30,12:00,14:30,16:00}
   connectors:
     mode: ${SLATE_CONNECTORS_MODE:MOCK}
     ec-base-url: ${SLATE_EC_BASE_URL:http://localhost:8080/mock/ec}

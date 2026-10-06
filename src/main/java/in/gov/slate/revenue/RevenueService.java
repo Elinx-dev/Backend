@@ -116,6 +116,7 @@ public class RevenueService {
         user.requirePermission("REVENUE_VERIFY");
         Map<String, Object> mutation = detail(mutationId);
         requireStatus(mutation, "VAO_PENDING");
+        requireVisitSlotBooked(((Number) mutation.get("transaction_id")).longValue(), user);
 
         jdbc.update("""
                 UPDATE revenue.proposed_mutation SET vao_verified_by = :userId, vao_verified_at = now(),
@@ -129,6 +130,28 @@ public class RevenueService {
         audit.record("MUTATION_FORWARDED", "MUTATION", String.valueOf(mutationId), ctx.txnRef(), ctx.propertyRef(),
                 Map.of("status", status), null);
         return detail(mutationId);
+    }
+
+    /**
+     * A VAO may only verify a record once a site-visit slot has been booked (accepted),
+     * and only the VAO the record is assigned to may verify it.
+     */
+    private void requireVisitSlotBooked(long transactionId, CurrentUser user) {
+        var params = new MapSqlParameterSource().addValue("txnId", transactionId).addValue("userId", user.id());
+        Boolean booked = jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM survey.site_visit
+                                WHERE transaction_id = :txnId AND status IN ('ACCEPTED','COMPLETED'))
+                """, params, Boolean.class);
+        if (!Boolean.TRUE.equals(booked)) {
+            throw ApiException.conflict("Book a site-visit slot before verifying this record");
+        }
+        Long assignedVao = jdbc.query("SELECT assigned_vao_id FROM core.transaction WHERE id = :txnId", params,
+                rs -> rs.next() ? (Long) rs.getObject(1, Long.class) : null);
+        if (assignedVao != null && assignedVao != user.id() && user.hasRole("VAO")) {
+            throw ApiException.forbidden("This record is assigned to another VAO");
+        }
+        jdbc.update("UPDATE core.transaction SET assigned_vao_id = COALESCE(assigned_vao_id, :userId) WHERE id = :txnId",
+                params);
     }
 
     @Transactional

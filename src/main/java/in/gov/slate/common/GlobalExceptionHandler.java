@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -55,6 +56,14 @@ public class GlobalExceptionHandler {
         logApiError(request, HttpStatus.NOT_FOUND, "NOT_FOUND", reason, null, ex);
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(body("NOT_FOUND", reason, null));
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<Map<String, Object>> handleAccessDenied(AccessDeniedException ex,
+            HttpServletRequest request) {
+        String reason = "You do not have access to this resource";
+        logApiError(request, HttpStatus.FORBIDDEN, "FORBIDDEN", reason, null, ex);
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body("FORBIDDEN", reason, null));
     }
 
     @ExceptionHandler(Exception.class)
