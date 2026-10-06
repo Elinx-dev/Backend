@@ -103,11 +103,18 @@ public class ConfigService {
     public Map<String, List<Map<String, Object>>> optionSets() {
         Map<String, List<Map<String, Object>>> out = new LinkedHashMap<>();
         jdbc.queryForList("""
-                SELECT option_set_code, value_code, label, sort_order
+                SELECT option_set_code, value_code, label, sort_order, attributes
                   FROM cfg.option_value WHERE active ORDER BY option_set_code, sort_order
                 """, new MapSqlParameterSource())
-                .forEach(r -> out.computeIfAbsent((String) r.get("option_set_code"), k -> new java.util.ArrayList<>())
-                        .add(Map.of("code", r.get("value_code"), "label", r.get("label"))));
+                .forEach(r -> {
+                    Map<String, Object> option = new LinkedHashMap<>();
+                    option.put("code", r.get("value_code"));
+                    option.put("label", r.get("label"));
+                    if (r.get("attributes") != null) {
+                        option.put("attributes", r.get("attributes"));
+                    }
+                    out.computeIfAbsent((String) r.get("option_set_code"), k -> new java.util.ArrayList<>()).add(option);
+                });
         return out;
     }
 

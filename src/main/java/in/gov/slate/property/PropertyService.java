@@ -56,7 +56,7 @@ public class PropertyService {
         this.locations = locations;
     }
 
-    public record OwnerInput(String ownerTypeCode, @NotBlank String ownerName, String aadhaarNumber, String pan,
+    public record OwnerInput(@NotBlank String ownerName, String aadhaarNumber, String pan,
                              String mobile, String address, String registrationNo,
                              RepresentativeInput representative) {
     }
@@ -87,6 +87,7 @@ public class PropertyService {
             String natureOfTitleCode,
             String landTypeCode,
             String classificationCode,
+            String ownerTypeCode,
             @NotNull @Positive BigDecimal extentValue,
             @NotBlank String extentUnit,
             @NotBlank String surveyNo,
@@ -123,7 +124,7 @@ public class PropertyService {
     public Map<String, Object> create(CreatePropertyRequest req) {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("PROPERTY_CREATE");
-        validateOwners(req.owners());
+        validateOwners(req.ownerTypeCode(), allowsMultipleOwners(user.stateCode(), req.ownerTypeCode()), req.owners());
         validateBoundaryMeasurements(req.boundaryMeasurements());
         validateChainOfTitle(req.chainOfTitle());
         locations.requireValidPath(user.stateCode(), req.districtCode(), req.sroCode(),
@@ -138,6 +139,7 @@ public class PropertyService {
                 .addValue("natureOfTitleCode", req.natureOfTitleCode())
                 .addValue("landTypeCode", req.landTypeCode())
                 .addValue("classificationCode", req.classificationCode())
+                .addValue("ownerTypeCode", req.ownerTypeCode())
                 .addValue("extentValue", req.extentValue())
                 .addValue("extentUnit", req.extentUnit())
                 .addValue("surveyNo", req.surveyNo())
@@ -163,12 +165,12 @@ public class PropertyService {
 
         Long id = jdbc.queryForObject("""
                 INSERT INTO core.property (state_code, property_ref, ulpin, property_type_code, nature_of_title_code,
-                    land_type_code, classification_code, extent_value, extent_unit, survey_no, subdivision_no,
+                    land_type_code, classification_code, owner_type_code, extent_value, extent_unit, survey_no, subdivision_no,
                     old_survey_reference, fmb_reference_no, district_code, taluk_code, village_code, sro_code,
                     panchayat, ward_no, street, door_no, boundary_north, boundary_south, boundary_east, boundary_west,
                     guideline_value, guideline_value_reference, guideline_value_entry_date, is_apartment_unit, created_by)
                 VALUES (:stateCode, :propertyRef, :ulpin, :propertyTypeCode, :natureOfTitleCode,
-                    :landTypeCode, :classificationCode, :extentValue, :extentUnit, :surveyNo, :subdivisionNo,
+                    :landTypeCode, :classificationCode, :ownerTypeCode, :extentValue, :extentUnit, :surveyNo, :subdivisionNo,
                     :oldSurveyReference, :fmbReferenceNo, :districtCode, :talukCode, :villageCode, :sroCode,
                     :panchayat, :wardNo, :street, :doorNo, :boundaryNorth, :boundarySouth, :boundaryEast, :boundaryWest,
                     :guidelineValue, :guidelineValueReference,
@@ -196,9 +198,9 @@ public class PropertyService {
                     .addValue("psdn", d.parentSubdivisionNo()));
         }
 
+        OwnerType.Form form = OwnerType.fromCode(req.ownerTypeCode()).orElseThrow().form();
         if (req.owners() != null) {
             for (OwnerInput o : req.owners()) {
-                OwnerType.Form form = OwnerType.fromCode(o.ownerTypeCode()).orElseThrow().form();
                 RepresentativeInput rep = form.representativeRole() == null ? null : o.representative();
                 jdbc.update("""
                         INSERT INTO core.property_owner (property_id, owner_type_code, owner_name, aadhaar_number, pan,
@@ -211,7 +213,7 @@ public class PropertyService {
                             :repMobile, 'PROPERTY_ENTRY', current_date)
                         """, new MapSqlParameterSource()
                         .addValue("propertyId", id)
-                        .addValue("ownerType", o.ownerTypeCode())
+                        .addValue("ownerType", req.ownerTypeCode())
                         .addValue("name", o.ownerName().trim())
                         .addValue("aadhaarNumber", form.ownerAadhaar() ? o.aadhaarNumber() : null)
                         .addValue("pan", o.pan())
@@ -320,9 +322,33 @@ public class PropertyService {
         return property;
     }
 
-    static void validateOwners(List<OwnerInput> owners) {
+    /** Reads cfg.option_value.attributes.allowMultipleOwners for the owner type; null if not configured. */
+    Boolean allowsMultipleOwners(String stateCode, String ownerTypeCode) {
+        if (ownerTypeCode == null) {
+            return null;
+        }
+        List<Boolean> rows = jdbc.queryForList("""
+                SELECT COALESCE((attributes ->> 'allowMultipleOwners')::boolean, FALSE)
+                  FROM cfg.option_value
+                 WHERE option_set_code = 'OWNER_TYPE' AND value_code = :code AND active
+                   AND state_code IN (:stateCode, '*')
+                 ORDER BY (state_code = '*')
+                 LIMIT 1
+                """, new MapSqlParameterSource().addValue("code", ownerTypeCode).addValue("stateCode", stateCode),
+                Boolean.class);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    static void validateOwners(String ownerTypeCode, Boolean allowMultipleOwners, List<OwnerInput> owners) {
+        OwnerType ownerType = OwnerType.fromCode(ownerTypeCode)
+                .filter(type -> allowMultipleOwners != null)
+                .orElseThrow(() -> ApiException.badRequest("A valid owner type is required"));
+        OwnerType.Form form = ownerType.form();
         if (owners == null || owners.isEmpty()) {
             throw ApiException.badRequest("At least one property owner is required");
+        }
+        if (owners.size() > 1 && !allowMultipleOwners) {
+            throw ApiException.badRequest("Only one owner can be recorded for owner type " + ownerType.name());
         }
         for (int index = 0; index < owners.size(); index++) {
             OwnerInput owner = owners.get(index);
@@ -330,9 +356,6 @@ public class PropertyService {
             if (owner == null) {
                 throw ApiException.badRequest(prefix + "details are required");
             }
-            OwnerType.Form form = OwnerType.fromCode(owner.ownerTypeCode())
-                    .orElseThrow(() -> ApiException.badRequest(prefix + "a valid owner type is required"))
-                    .form();
             requireText(owner.ownerName(), prefix + "name is required");
             requirePattern(owner.pan(), PAN, prefix + "PAN must match AAAAA9999A");
             requireText(owner.address(), prefix + "address is required");
