@@ -231,6 +231,8 @@ public class ValidationEngine {
 
         // Workflow guards.
         predicates.put("ruleChecksRun", ctx -> !ctx.ruleResults().isEmpty());
+        predicates.put("ruleChecksPassed", ctx ->
+                !ctx.ruleResults().isEmpty() && blockingRuleResults(ctx).isEmpty());
         predicates.put("rulesAreAdvisory", ctx -> !config.rulesAreBlocking());
         predicates.put("surveyRequired", TransactionContext::surveyRequired);
         predicates.put("surveyNotRequired", ctx -> !ctx.surveyRequired());
@@ -239,7 +241,17 @@ public class ValidationEngine {
         predicates.put("readyToRegister", ctx ->
                 predicates.get("allPartiesConsentVerified").test(ctx)
                         && predicates.get("feesFullyPaid").test(ctx)
-                        && predicates.get("ruleChecksRun").test(ctx));
+                        && predicates.get("ruleChecksPassed").test(ctx));
+    }
+
+    /** Latest rule results whose reason code is configured to stop pre-registration for that engine. */
+    public List<Map<String, Object>> blockingRuleResults(TransactionContext ctx) {
+        Map<String, java.util.Set<String>> blocking =
+                config.blockingRuleReasons((String) ctx.transaction().get("state_code"));
+        return ctx.ruleResults().stream()
+                .filter(r -> blocking.getOrDefault((String) r.get("engine"), java.util.Set.of())
+                        .contains((String) r.get("reason_code")))
+                .toList();
     }
 
     private static BigDecimal sum(List<Map<String, Object>> rows, String column) {

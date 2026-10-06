@@ -1,9 +1,13 @@
 package in.gov.slate.config;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -352,10 +356,40 @@ public class ConfigService {
 
     public Map<String, Object> ruleEngineConfig(String stateCode, String engine) {
         var rows = jdbc.queryForList("""
-                SELECT engine, ec_lookback_years, extent_tolerance_pct, supported_land_types, enabled
+                SELECT engine, ec_lookback_years, extent_tolerance_pct, supported_land_types, enabled,
+                       blocking_reason_codes
                   FROM cfg.rule_engine_config WHERE state_code = :stateCode AND engine = :engine
                 """, new MapSqlParameterSource().addValue("stateCode", stateCode).addValue("engine", engine));
         return rows.isEmpty() ? Map.of("enabled", false) : rows.get(0);
+    }
+
+    /** Reason codes per engine that stop pre-registration, from cfg.rule_engine_config. */
+    public Map<String, Set<String>> blockingRuleReasons(String stateCode) {
+        Map<String, Set<String>> out = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT engine, blocking_reason_codes FROM cfg.rule_engine_config WHERE state_code = :stateCode
+                """, new MapSqlParameterSource("stateCode", stateCode), rs -> {
+            Set<String> codes = new LinkedHashSet<>();
+            java.sql.Array array = rs.getArray("blocking_reason_codes");
+            if (array != null) {
+                for (Object code : (Object[]) array.getArray()) {
+                    codes.add(String.valueOf(code));
+                }
+            }
+            out.put(rs.getString("engine"), codes);
+        });
+        return out;
+    }
+
+    /** Active EC classification keywords grouped by category, lower-cased. */
+    public Map<String, List<String>> ecClassificationKeywords() {
+        Map<String, List<String>> out = new LinkedHashMap<>();
+        jdbc.queryForList("""
+                SELECT category, keyword FROM cfg.ec_classification_keyword WHERE active ORDER BY category, keyword
+                """, new MapSqlParameterSource())
+                .forEach(r -> out.computeIfAbsent((String) r.get("category"), k -> new ArrayList<>())
+                        .add(((String) r.get("keyword")).toLowerCase(Locale.ROOT)));
+        return out;
     }
 
     public boolean rulesAreBlocking() {

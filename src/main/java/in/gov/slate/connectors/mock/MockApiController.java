@@ -46,12 +46,14 @@ public class MockApiController {
     }
 
     @GetMapping("/ec/certificate")
-    public ResponseEntity<EcCertificate> ecCertificate(@RequestParam String village,
+    public ResponseEntity<EcCertificate> ecCertificate(@RequestParam(required = false) String district,
+                                                       @RequestParam(required = false) String taluk,
+                                                       @RequestParam String village,
                                                        @RequestParam String surveyNo,
                                                        @RequestParam(required = false) String subdivisionNo,
                                                        @RequestParam(required = false) String searchFrom,
                                                        @RequestParam(required = false) String searchTo) {
-        EcCertificate certificate = ec.fetch(new EcRequest(village, surveyNo, subdivisionNo,
+        EcCertificate certificate = ec.fetch(new EcRequest(district, taluk, village, surveyNo, subdivisionNo,
                 searchFrom == null ? null : LocalDate.parse(searchFrom),
                 searchTo == null ? null : LocalDate.parse(searchTo)));
         return certificate == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(certificate);

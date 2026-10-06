@@ -87,5 +87,131 @@
     "extent": null, "extentUnit": null,
     "owners": [],
     "sourceReference": "KA-REVENUE-API/RTC/UNAVAILABLE"
+  },
+
+  "KARAPAKKAM|310|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-KRP-5100",
+    "village": "KARAPAKKAM",
+    "surveyNo": "310",
+    "subdivisionNo": "1",
+    "landType": "RURAL",
+    "classification": "DRY",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Meena Rajan",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/KRP/5100"
+  },
+
+  "KARAPAKKAM|215|4": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-KRP-5101",
+    "village": "KARAPAKKAM",
+    "surveyNo": "215",
+    "subdivisionNo": "4",
+    "landType": "RURAL",
+    "classification": "DRY",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Arun Prakash",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/KRP/5101"
+  },
+
+  "KARAPAKKAM|330|2": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-KRP-5102",
+    "village": "KARAPAKKAM",
+    "surveyNo": "330",
+    "subdivisionNo": "2",
+    "landType": "RURAL",
+    "classification": "DRY",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Senthil Kumar",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/KRP/5102"
+  },
+
+  "KARAPAKKAM|340|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-KRP-5103",
+    "village": "KARAPAKKAM",
+    "surveyNo": "340",
+    "subdivisionNo": "1",
+    "landType": "RURAL",
+    "classification": "DRY",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Kavitha Ramesh",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/KRP/5103"
+  },
+
+  "KARAPAKKAM|100A|": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-KRP-5104",
+    "village": "KARAPAKKAM",
+    "surveyNo": "100A",
+    "subdivisionNo": null,
+    "landType": "RURAL",
+    "classification": "DRY",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Ravi Shankar",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/KRP/5104"
+  },
+
+  "KARAPAKKAM|350|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-KRP-5105",
+    "village": "KARAPAKKAM",
+    "surveyNo": "350",
+    "subdivisionNo": "1",
+    "landType": "RURAL",
+    "classification": "DRY",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Lakshmi Narayanan",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/KRP/5105"
   }
 }
