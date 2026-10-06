@@ -35,6 +35,11 @@ import jakarta.validation.constraints.Size;
 public class PropertyService {
 
   private static final int MAX_BOUNDARY_MEASUREMENTS = 8;
+  private static final java.util.regex.Pattern AADHAAR = java.util.regex.Pattern.compile("\\d{12}");
+  private static final java.util.regex.Pattern PAN = java.util.regex.Pattern.compile("[A-Z]{5}[0-9]{4}[A-Z]");
+  private static final java.util.regex.Pattern MOBILE = java.util.regex.Pattern.compile("[6-9]\\d{9}");
+  private static final java.util.regex.Pattern CIN = java.util.regex.Pattern.compile("[LU]\\d{5}[A-Z]{2}\\d{4}[A-Z]{3}\\d{6}");
+  private static final java.util.regex.Pattern LLPIN = java.util.regex.Pattern.compile("[A-Z]{3}-\\d{4}");
   private static final Set<String> BOUNDARY_POINTS = Set.of("NORTH", "SOUTH", "EAST", "WEST",
       "NORTH_EAST", "NORTH_WEST", "SOUTH_EAST", "SOUTH_WEST");
 
@@ -51,8 +56,13 @@ public class PropertyService {
         this.locations = locations;
     }
 
-    public record OwnerInput(@NotBlank String ownerName, String aadhaarNumber, String pan, String address,
-                             BigDecimal sharePct, String shareNote) {
+    public record OwnerInput(String ownerTypeCode, @NotBlank String ownerName, String aadhaarNumber, String pan,
+                             String mobile, String address, String registrationNo,
+                             RepresentativeInput representative) {
+    }
+
+    public record RepresentativeInput(String name, String designation, String aadhaarNumber, String pan,
+                                      String mobile) {
     }
 
         public record BoundaryMeasurementInput(
@@ -113,6 +123,7 @@ public class PropertyService {
     public Map<String, Object> create(CreatePropertyRequest req) {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("PROPERTY_CREATE");
+        validateOwners(req.owners());
         validateBoundaryMeasurements(req.boundaryMeasurements());
         validateChainOfTitle(req.chainOfTitle());
         locations.requireValidPath(user.stateCode(), req.districtCode(), req.sroCode(),
@@ -161,7 +172,7 @@ public class PropertyService {
                     :oldSurveyReference, :fmbReferenceNo, :districtCode, :talukCode, :villageCode, :sroCode,
                     :panchayat, :wardNo, :street, :doorNo, :boundaryNorth, :boundarySouth, :boundaryEast, :boundaryWest,
                     :guidelineValue, :guidelineValueReference,
-                    CASE WHEN :guidelineValue IS NULL THEN NULL ELSE current_date END,
+                    CASE WHEN CAST(:guidelineValue AS NUMERIC) IS NULL THEN NULL ELSE current_date END,
                     :isApartmentUnit, :createdBy)
                 RETURNING id
                 """, params, Long.class);
@@ -187,19 +198,33 @@ public class PropertyService {
 
         if (req.owners() != null) {
             for (OwnerInput o : req.owners()) {
+                OwnerType.Form form = OwnerType.fromCode(o.ownerTypeCode()).orElseThrow().form();
+                RepresentativeInput rep = form.representativeRole() == null ? null : o.representative();
                 jdbc.update("""
-                        INSERT INTO core.property_owner (property_id, owner_name, aadhaar_number, pan, address,
-                            share_pct, share_note, source, effective_from)
-                        VALUES (:propertyId, :name, :aadhaarNumber, :pan, :address, :share, :note,
-                            'PROPERTY_ENTRY', current_date)
+                        INSERT INTO core.property_owner (property_id, owner_type_code, owner_name, aadhaar_number, pan,
+                            mobile, address, registration_no, representative_role, representative_name,
+                            representative_designation, representative_aadhaar, representative_pan,
+                            representative_mobile, source, effective_from)
+                        VALUES (:propertyId, :ownerType, :name, :aadhaarNumber, :pan,
+                            :mobile, :address, :registrationNo, :repRole, :repName,
+                            :repDesignation, :repAadhaar, :repPan,
+                            :repMobile, 'PROPERTY_ENTRY', current_date)
                         """, new MapSqlParameterSource()
                         .addValue("propertyId", id)
-                        .addValue("name", o.ownerName())
-                        .addValue("aadhaarNumber", o.aadhaarNumber())
+                        .addValue("ownerType", o.ownerTypeCode())
+                        .addValue("name", o.ownerName().trim())
+                        .addValue("aadhaarNumber", form.ownerAadhaar() ? o.aadhaarNumber() : null)
                         .addValue("pan", o.pan())
-                        .addValue("address", o.address())
-                        .addValue("share", o.sharePct())
-                        .addValue("note", o.shareNote()));
+                        .addValue("mobile", form.ownerMobile() ? o.mobile() : null)
+                        .addValue("address", o.address().trim())
+                        .addValue("registrationNo", form.registrationNo() ? o.registrationNo().trim() : null)
+                        .addValue("repRole", form.representativeRole())
+                        .addValue("repName", rep == null ? null : rep.name().trim())
+                        .addValue("repDesignation", rep == null || !form.representativeDesignation()
+                                ? null : rep.designation().trim())
+                        .addValue("repAadhaar", rep == null ? null : rep.aadhaarNumber())
+                        .addValue("repPan", rep == null ? null : rep.pan())
+                        .addValue("repMobile", rep == null || !form.representativeMobile() ? null : rep.mobile()));
             }
         }
 
@@ -258,7 +283,10 @@ public class PropertyService {
         long id = ((Number) property.get("id")).longValue();
         var idParam = new MapSqlParameterSource("propertyId", id);
         property.put("registeredOwners", jdbc.queryForList("""
-                SELECT owner_name, aadhaar_number, pan, address, share_pct, share_note, source, effective_from
+                SELECT owner_type_code, owner_name, aadhaar_number, pan, mobile, address, registration_no,
+                       representative_role, representative_name, representative_designation,
+                       representative_aadhaar, representative_pan, representative_mobile,
+                       share_pct, share_note, source, effective_from
                   FROM core.property_owner WHERE property_id = :propertyId AND effective_to IS NULL
                  ORDER BY id
                 """, idParam));
@@ -290,6 +318,75 @@ public class PropertyService {
                     "SELECT * FROM core.property_apartment_detail WHERE property_id = :propertyId", idParam));
         }
         return property;
+    }
+
+    static void validateOwners(List<OwnerInput> owners) {
+        if (owners == null || owners.isEmpty()) {
+            throw ApiException.badRequest("At least one property owner is required");
+        }
+        for (int index = 0; index < owners.size(); index++) {
+            OwnerInput owner = owners.get(index);
+            String prefix = "Owner " + (index + 1) + ": ";
+            if (owner == null) {
+                throw ApiException.badRequest(prefix + "details are required");
+            }
+            OwnerType.Form form = OwnerType.fromCode(owner.ownerTypeCode())
+                    .orElseThrow(() -> ApiException.badRequest(prefix + "a valid owner type is required"))
+                    .form();
+            requireText(owner.ownerName(), prefix + "name is required");
+            requirePattern(owner.pan(), PAN, prefix + "PAN must match AAAAA9999A");
+            requireText(owner.address(), prefix + "address is required");
+            if (form.ownerAadhaar()) {
+                requirePattern(owner.aadhaarNumber(), AADHAAR, prefix + "Aadhaar must contain exactly 12 digits");
+            }
+            if (form.ownerMobile()) {
+                requirePattern(owner.mobile(), MOBILE, prefix + "mobile must be a 10-digit Indian mobile number");
+            }
+            if (form == OwnerType.Form.COMPANY) {
+                requirePattern(owner.registrationNo(), CIN, prefix + "CIN must be a valid 21-character CIN");
+            } else if (form == OwnerType.Form.LLP) {
+                requirePattern(owner.registrationNo(), LLPIN, prefix + "LLPIN must match AAA-9999");
+            } else if (form.registrationNo()) {
+                requireText(owner.registrationNo(), prefix + "registration number is required");
+            }
+            if (form.representativeRole() != null) {
+                RepresentativeInput rep = owner.representative();
+                String role = prefix + representativeLabel(form) + " ";
+                if (rep == null) {
+                    throw ApiException.badRequest(role + "details are required");
+                }
+                requireText(rep.name(), role + "name is required");
+                if (form.representativeDesignation()) {
+                    requireText(rep.designation(), role + "designation is required");
+                }
+                requirePattern(rep.aadhaarNumber(), AADHAAR, role + "Aadhaar must contain exactly 12 digits");
+                requirePattern(rep.pan(), PAN, role + "PAN must match AAAAA9999A");
+                if (form.representativeMobile()) {
+                    requirePattern(rep.mobile(), MOBILE, role + "mobile must be a 10-digit Indian mobile number");
+                }
+            }
+        }
+    }
+
+    private static String representativeLabel(OwnerType.Form form) {
+        return switch (form) {
+            case COMPANY -> "authorised signatory";
+            case HUF -> "karta";
+            case TRUST -> "trustee";
+            default -> "authorised partner";
+        };
+    }
+
+    private static void requireText(String value, String message) {
+        if (value == null || value.isBlank()) {
+            throw ApiException.badRequest(message);
+        }
+    }
+
+    private static void requirePattern(String value, java.util.regex.Pattern pattern, String message) {
+        if (value == null || !pattern.matcher(value).matches()) {
+            throw ApiException.badRequest(message);
+        }
     }
 
       private void validateBoundaryMeasurements(List<BoundaryMeasurementInput> measurements) {
