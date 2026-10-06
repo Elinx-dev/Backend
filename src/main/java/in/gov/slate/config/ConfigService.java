@@ -39,6 +39,7 @@ public class ConfigService {
         out.put("transactionTypes", transactionTypes(stateCode));
         out.put("surveyFees", surveyFees(stateCode));
         out.put("bloodRelations", bloodRelations(stateCode));
+        out.put("feeRelationshipCategories", feeRelationshipCategories(stateCode));
         out.put("optionSets", optionSets());
         out.put("relationships", jdbc.queryForList(
                 "SELECT code, name, fee_category, sort_order FROM master.relationship ORDER BY sort_order",
@@ -99,8 +100,14 @@ public class ConfigService {
     public List<Map<String, Object>> transactionTypes(String stateCode) {
         return jdbc.queryForList("""
                 SELECT DISTINCT ON (code) code, name, first_party_label, second_party_label,
-                       subdivision_allowed, individuals_only, blood_relation_required, display_order, status
-                  FROM master.transaction_type
+                       subdivision_allowed, individuals_only, blood_relation_required, display_order, status,
+                       default_relationship_category,
+                       EXISTS (SELECT 1 FROM master.fee_master f
+                                WHERE f.state_code = :stateCode AND f.deed_type_code = t.code
+                                  AND f.valuation_basis = 'SCHEDULE_VALUE' AND f.status = 'ACTIVE'
+                                  AND f.effective_from <= current_date
+                                  AND (f.effective_to IS NULL OR f.effective_to >= current_date)) AS schedule_valuation
+                  FROM master.transaction_type t
                  WHERE state_code IN (:stateCode, '*') AND status = 'ACTIVE'
                  ORDER BY code, (state_code = '*')
                 """, new MapSqlParameterSource("stateCode", stateCode)).stream()
@@ -141,6 +148,25 @@ public class ConfigService {
         return surveyFees(stateCode).stream()
                 .filter(f -> locationType != null && locationType.equals(f.get("location_type")))
                 .findFirst().orElse(null);
+    }
+
+    /** Fee relationship categories; transaction_types is a comma-separated list of transaction type codes. */
+    public List<Map<String, Object>> feeRelationshipCategories(String stateCode) {
+        return jdbc.queryForList("""
+                SELECT DISTINCT ON (code) code, label, array_to_string(transaction_types, ',') AS transaction_types,
+                       display_order
+                  FROM master.fee_relationship_category
+                 WHERE state_code IN (:stateCode, '*') AND status = 'ACTIVE'
+                 ORDER BY code, (state_code = '*')
+                """, new MapSqlParameterSource("stateCode", stateCode)).stream()
+                .sorted(Comparator.comparingInt(r -> ((Number) r.get("display_order")).intValue()))
+                .toList();
+    }
+
+    public boolean isFeeRelationshipCategory(String stateCode, String transactionType, String code) {
+        return feeRelationshipCategories(stateCode).stream()
+                .filter(c -> code.equals(c.get("code")))
+                .anyMatch(c -> List.of(((String) c.get("transaction_types")).split(",")).contains(transactionType));
     }
 
     public List<Map<String, Object>> bloodRelations(String stateCode) {

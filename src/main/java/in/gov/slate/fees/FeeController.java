@@ -34,8 +34,9 @@ public class FeeController {
     }
 
     @PostMapping("/fees")
-    public Map<String, Object> calculate(@PathVariable String txnRef) {
-        return fees.calculate(txnRef);
+    public Map<String, Object> calculate(@PathVariable String txnRef,
+                                         @RequestBody(required = false) FeeService.FeeInput body) {
+        return fees.calculate(txnRef, body == null ? null : body.pageCount());
     }
 
     @GetMapping("/payments")

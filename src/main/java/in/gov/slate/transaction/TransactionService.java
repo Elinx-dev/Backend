@@ -1,9 +1,11 @@
 package in.gov.slate.transaction;
 
 import java.math.BigDecimal;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -87,6 +89,12 @@ public class TransactionService {
                              BigDecimal extentTransferred, String authorityPoaReference, Long propertyOwnerId) {
     }
 
+    public record ScheduleSurveyInput(String surveyNo, String subdivisionNo, BigDecimal value) {
+    }
+
+    public record ScheduleInput(String label, BigDecimal value, List<ScheduleSurveyInput> surveys) {
+    }
+
     public record WitnessInput(@NotBlank String name, String address, String idProofType, String idProofRef) {
     }
 
@@ -122,8 +130,10 @@ public class TransactionService {
             surveyRequired = decision.surveyRequired();
             subdivisionRequired = decision.subdivisionRequired();
             surveyRequiredByParty = decision.surveyRequiredByParty();
-            if (Boolean.TRUE.equals(transactionType.get("blood_relation_required"))) {
-                relationshipCategory = "FAMILY";
+            Object defaultCategory = transactionType.get("default_relationship_category");
+            if (defaultCategory != null && (Boolean.TRUE.equals(transactionType.get("blood_relation_required"))
+                    || relationshipCategory == null || relationshipCategory.isBlank())) {
+                relationshipCategory = (String) defaultCategory;
             }
             if (surveyRequired) {
                 surveyorUserId = requireSurveyor(user.stateCode(), req.surveyorUserId());
@@ -134,6 +144,7 @@ public class TransactionService {
             surveyRequired = SurveyRequirement.derive((String) deedType.get("survey_rule"), transferScope);
         }
 
+        requireRelationshipCategory(user.stateCode(), req.deedTypeCode(), relationshipCategory);
         Map<String, Object> wf = config.workflow(user.stateCode(), req.deedTypeCode());
         String txnRef = numbering.next(user.stateCode(), "TXN_REF", (String) property.get("district_code"));
 
@@ -243,6 +254,7 @@ public class TransactionService {
         user.requirePermission("TXN_EDIT");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
         requireEditable(ctx);
+        requireRelationshipCategory(user.stateCode(), ctx.deedTypeCode(), req.relationshipCategory());
 
         jdbc.update("""
                 UPDATE core.transaction SET
@@ -567,6 +579,113 @@ public class TransactionService {
         return detail(txnRef);
     }
 
+    private void requireRelationshipCategory(String stateCode, String transactionType, String category) {
+        if (category != null && !category.isBlank()
+                && !config.isFeeRelationshipCategory(stateCode, transactionType, category)) {
+            throw ApiException.badRequest("Relationship category " + category + " is not configured for "
+                    + transactionType);
+        }
+    }
+
+    /** A schedule's value is the total of its survey-level values when any are entered, else its own value. */
+    static BigDecimal scheduleValue(ScheduleInput schedule) {
+        List<ScheduleSurveyInput> surveys = schedule.surveys() == null ? List.of() : schedule.surveys();
+        boolean surveyValues = surveys.stream().anyMatch(s -> s.value() != null);
+        BigDecimal value = surveyValues
+                ? surveys.stream().map(s -> s.value() == null ? BigDecimal.ZERO : s.value())
+                        .reduce(BigDecimal.ZERO, BigDecimal::add)
+                : schedule.value();
+        if (value == null || value.signum() <= 0) {
+            throw ApiException.badRequest("Enter a value above zero for " + schedule.label());
+        }
+        return value;
+    }
+
+    @Transactional
+    public Map<String, Object> saveSchedules(String txnRef, List<ScheduleInput> schedules) {
+        CurrentUser user = CurrentUser.require();
+        user.requirePermission("TXN_EDIT");
+        TransactionContext ctx = repository.load(txnRef, user.stateCode());
+        requireEditable(ctx);
+        if (ctx.paidTotal().signum() > 0) {
+            throw ApiException.conflict("Schedules cannot be changed after payment has been recorded");
+        }
+        List<ScheduleInput> input = schedules == null ? List.of() : schedules;
+        Set<String> labels = new HashSet<>();
+        for (ScheduleInput schedule : input) {
+            if (schedule.label() == null || schedule.label().isBlank()) {
+                throw ApiException.badRequest("Every schedule needs a name, e.g. Schedule A");
+            }
+            if (!labels.add(schedule.label().trim().toUpperCase())) {
+                throw ApiException.badRequest("Schedule " + schedule.label() + " is entered twice");
+            }
+            for (ScheduleSurveyInput survey : schedule.surveys() == null ? List.<ScheduleSurveyInput>of()
+                    : schedule.surveys()) {
+                if (survey.surveyNo() == null || survey.surveyNo().isBlank()) {
+                    throw ApiException.badRequest("Enter the survey number for each line in " + schedule.label());
+                }
+                if (survey.value() != null && survey.value().signum() < 0) {
+                    throw ApiException.badRequest("Survey values in " + schedule.label() + " cannot be negative");
+                }
+            }
+            scheduleValue(schedule);
+        }
+
+        jdbc.update("DELETE FROM core.transaction_schedule WHERE transaction_id = :txnId",
+                new MapSqlParameterSource("txnId", ctx.id()));
+        int seq = 0;
+        for (ScheduleInput schedule : input) {
+            Long scheduleId = jdbc.queryForObject("""
+                    INSERT INTO core.transaction_schedule (transaction_id, seq, label, manual_value, schedule_value)
+                    VALUES (:txnId, :seq, :label, :manualValue, :scheduleValue)
+                    RETURNING id
+                    """, new MapSqlParameterSource()
+                    .addValue("txnId", ctx.id())
+                    .addValue("seq", ++seq)
+                    .addValue("label", schedule.label().trim())
+                    .addValue("manualValue", schedule.value())
+                    .addValue("scheduleValue", scheduleValue(schedule)), Long.class);
+            int surveySeq = 0;
+            for (ScheduleSurveyInput survey : schedule.surveys() == null ? List.<ScheduleSurveyInput>of()
+                    : schedule.surveys()) {
+                jdbc.update("""
+                        INSERT INTO core.transaction_schedule_survey (schedule_id, seq, survey_no, subdivision_no, value)
+                        VALUES (:scheduleId, :seq, :surveyNo, :subdivisionNo, :value)
+                        """, new MapSqlParameterSource()
+                        .addValue("scheduleId", scheduleId)
+                        .addValue("seq", ++surveySeq)
+                        .addValue("surveyNo", survey.surveyNo().trim())
+                        .addValue("subdivisionNo", survey.subdivisionNo() == null || survey.subdivisionNo().isBlank()
+                                ? null : survey.subdivisionNo().trim())
+                        .addValue("value", survey.value()));
+            }
+        }
+        audit.record("TRANSACTION_SCHEDULES_SAVED", "TRANSACTION", String.valueOf(ctx.id()), txnRef,
+                ctx.propertyRef(), Map.of("schedules", input.size()), null);
+        return detail(txnRef);
+    }
+
+    private List<Map<String, Object>> schedulesOf(long txnId) {
+        var param = new MapSqlParameterSource("txnId", txnId);
+        List<Map<String, Object>> surveys = jdbc.queryForList("""
+                SELECT ss.schedule_id, ss.survey_no, ss.subdivision_no, ss.value
+                  FROM core.transaction_schedule_survey ss
+                  JOIN core.transaction_schedule s ON s.id = ss.schedule_id
+                 WHERE s.transaction_id = :txnId ORDER BY ss.seq
+                """, param);
+        return jdbc.queryForList("""
+                SELECT id, seq, label, manual_value, schedule_value FROM core.transaction_schedule
+                 WHERE transaction_id = :txnId ORDER BY seq
+                """, param).stream().map(schedule -> {
+                    Map<String, Object> out = new LinkedHashMap<>(schedule);
+                    out.put("surveys", surveys.stream()
+                            .filter(s -> ((Number) s.get("schedule_id")).longValue()
+                                    == ((Number) schedule.get("id")).longValue())
+                            .toList());
+                    return out;
+                }).toList();
+    }
+
     public Map<String, Object> detail(String txnRef) {
         CurrentUser user = CurrentUser.require();
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
@@ -578,6 +697,11 @@ public class TransactionService {
         out.put("consents", ctx.consents());
         out.put("ruleCheckResults", ctx.ruleResults());
         out.put("feeCalculation", ctx.feeCalculation());
+        out.put("schedules", schedulesOf(ctx.id()));
+        out.put("feeScheduleLines", ctx.feeCalculation() == null ? List.of() : jdbc.queryForList("""
+                SELECT schedule_label, schedule_value, stamp_duty, registration_fee
+                  FROM core.fee_calculation_line WHERE fee_calculation_id = :id ORDER BY seq
+                """, new MapSqlParameterSource("id", ctx.feeCalculation().get("id"))));
         out.put("payments", ctx.payments());
         out.put("registeredOwners", ctx.propertyOwners());
         out.put("surveyParcels", ctx.surveyParcels());

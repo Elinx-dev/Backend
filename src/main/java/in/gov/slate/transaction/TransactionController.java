@@ -80,6 +80,12 @@ public class TransactionController {
         return transactions.savePartyAadhaar(txnRef, partyId, body.aadhaarNumber());
     }
 
+    @PutMapping("/{txnRef}/schedules")
+    public Map<String, Object> saveSchedules(@PathVariable String txnRef,
+                                             @RequestBody List<TransactionService.ScheduleInput> body) {
+        return transactions.saveSchedules(txnRef, body);
+    }
+
     @PutMapping("/{txnRef}/witnesses")
     public Map<String, Object> saveWitnesses(@PathVariable String txnRef,
                                              @Valid @RequestBody List<TransactionService.WitnessInput> body) {
