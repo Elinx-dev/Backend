@@ -130,9 +130,20 @@ public class WorkflowEngine {
                     .map(party -> String.valueOf(party.get("name")))
                     .toList();
             if (!partiesWithoutAadhaar.isEmpty()) {
-                missing.add("Aadhaar for: " + String.join(", ", partiesWithoutAadhaar));
+                missing.add("no Aadhaar on record for " + String.join(", ", partiesWithoutAadhaar)
+                        + " (enter it on the Aadhaar consent tab)");
             }
             return "Cannot request consent: " + String.join("; ", missing);
+        }
+        if ("ruleChecksPassed".equals(guard)) {
+            if (ctx.ruleResults().isEmpty()) {
+                return "Run rule checks before continuing";
+            }
+            List<String> reasons = validation.blockingRuleResults(ctx).stream()
+                    .map(r -> r.get("engine") + ": " + r.get("reason_code"))
+                    .toList();
+            return "Pre-registration stopped by rule check (" + String.join(", ", reasons)
+                    + "). The Encumbrance Certificate shows a matter that must be resolved before registration.";
         }
         return "Guard " + guard + " is not satisfied";
     }

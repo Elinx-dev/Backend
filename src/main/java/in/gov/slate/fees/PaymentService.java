@@ -49,6 +49,18 @@ public class PaymentService {
         if (input.amount() == null || input.amount().signum() <= 0) {
             throw ApiException.badRequest("Payment amount must be positive");
         }
+        if (input.paidAt() != null && input.paidAt().isAfter(OffsetDateTime.now())) {
+            throw ApiException.badRequest("Payment date cannot be in the future");
+        }
+        Boolean stale = jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM core.transaction_schedule
+                                WHERE transaction_id = :txnId AND created_at > :calculatedAt)
+                """, new MapSqlParameterSource()
+                .addValue("txnId", ctx.id())
+                .addValue("calculatedAt", ctx.feeCalculation().get("calculated_at")), Boolean.class);
+        if (Boolean.TRUE.equals(stale)) {
+            throw ApiException.conflict("Schedules changed after the fee was calculated; calculate the fee again");
+        }
 
         jdbc.update("""
                 INSERT INTO core.payment (transaction_id, mode, reference_no, amount, paid_at, received_by, status)

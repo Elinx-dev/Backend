@@ -1,9 +1,13 @@
 package in.gov.slate.config;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -35,6 +39,7 @@ public class ConfigService {
         out.put("transactionTypes", transactionTypes(stateCode));
         out.put("surveyFees", surveyFees(stateCode));
         out.put("bloodRelations", bloodRelations(stateCode));
+        out.put("feeRelationshipCategories", feeRelationshipCategories(stateCode));
         out.put("optionSets", optionSets());
         out.put("relationships", jdbc.queryForList(
                 "SELECT code, name, fee_category, sort_order FROM master.relationship ORDER BY sort_order",
@@ -95,8 +100,14 @@ public class ConfigService {
     public List<Map<String, Object>> transactionTypes(String stateCode) {
         return jdbc.queryForList("""
                 SELECT DISTINCT ON (code) code, name, first_party_label, second_party_label,
-                       subdivision_allowed, individuals_only, blood_relation_required, display_order, status
-                  FROM master.transaction_type
+                       subdivision_allowed, individuals_only, blood_relation_required, display_order, status,
+                       default_relationship_category,
+                       EXISTS (SELECT 1 FROM master.fee_master f
+                                WHERE f.state_code = :stateCode AND f.deed_type_code = t.code
+                                  AND f.valuation_basis = 'SCHEDULE_VALUE' AND f.status = 'ACTIVE'
+                                  AND f.effective_from <= current_date
+                                  AND (f.effective_to IS NULL OR f.effective_to >= current_date)) AS schedule_valuation
+                  FROM master.transaction_type t
                  WHERE state_code IN (:stateCode, '*') AND status = 'ACTIVE'
                  ORDER BY code, (state_code = '*')
                 """, new MapSqlParameterSource("stateCode", stateCode)).stream()
@@ -137,6 +148,25 @@ public class ConfigService {
         return surveyFees(stateCode).stream()
                 .filter(f -> locationType != null && locationType.equals(f.get("location_type")))
                 .findFirst().orElse(null);
+    }
+
+    /** Fee relationship categories; transaction_types is a comma-separated list of transaction type codes. */
+    public List<Map<String, Object>> feeRelationshipCategories(String stateCode) {
+        return jdbc.queryForList("""
+                SELECT DISTINCT ON (code) code, label, array_to_string(transaction_types, ',') AS transaction_types,
+                       display_order
+                  FROM master.fee_relationship_category
+                 WHERE state_code IN (:stateCode, '*') AND status = 'ACTIVE'
+                 ORDER BY code, (state_code = '*')
+                """, new MapSqlParameterSource("stateCode", stateCode)).stream()
+                .sorted(Comparator.comparingInt(r -> ((Number) r.get("display_order")).intValue()))
+                .toList();
+    }
+
+    public boolean isFeeRelationshipCategory(String stateCode, String transactionType, String code) {
+        return feeRelationshipCategories(stateCode).stream()
+                .filter(c -> code.equals(c.get("code")))
+                .anyMatch(c -> List.of(((String) c.get("transaction_types")).split(",")).contains(transactionType));
     }
 
     public List<Map<String, Object>> bloodRelations(String stateCode) {
@@ -352,10 +382,40 @@ public class ConfigService {
 
     public Map<String, Object> ruleEngineConfig(String stateCode, String engine) {
         var rows = jdbc.queryForList("""
-                SELECT engine, ec_lookback_years, extent_tolerance_pct, supported_land_types, enabled
+                SELECT engine, ec_lookback_years, extent_tolerance_pct, supported_land_types, enabled,
+                       blocking_reason_codes
                   FROM cfg.rule_engine_config WHERE state_code = :stateCode AND engine = :engine
                 """, new MapSqlParameterSource().addValue("stateCode", stateCode).addValue("engine", engine));
         return rows.isEmpty() ? Map.of("enabled", false) : rows.get(0);
+    }
+
+    /** Reason codes per engine that stop pre-registration, from cfg.rule_engine_config. */
+    public Map<String, Set<String>> blockingRuleReasons(String stateCode) {
+        Map<String, Set<String>> out = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT engine, blocking_reason_codes FROM cfg.rule_engine_config WHERE state_code = :stateCode
+                """, new MapSqlParameterSource("stateCode", stateCode), rs -> {
+            Set<String> codes = new LinkedHashSet<>();
+            java.sql.Array array = rs.getArray("blocking_reason_codes");
+            if (array != null) {
+                for (Object code : (Object[]) array.getArray()) {
+                    codes.add(String.valueOf(code));
+                }
+            }
+            out.put(rs.getString("engine"), codes);
+        });
+        return out;
+    }
+
+    /** Active EC classification keywords grouped by category, lower-cased. */
+    public Map<String, List<String>> ecClassificationKeywords() {
+        Map<String, List<String>> out = new LinkedHashMap<>();
+        jdbc.queryForList("""
+                SELECT category, keyword FROM cfg.ec_classification_keyword WHERE active ORDER BY category, keyword
+                """, new MapSqlParameterSource())
+                .forEach(r -> out.computeIfAbsent((String) r.get("category"), k -> new ArrayList<>())
+                        .add(((String) r.get("keyword")).toLowerCase(Locale.ROOT)));
+        return out;
     }
 
     public boolean rulesAreBlocking() {

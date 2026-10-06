@@ -1,11 +1,9 @@
 package in.gov.slate.registration;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -36,7 +34,6 @@ import in.gov.slate.transaction.WorkflowEngine;
 @Service
 public class RegistrationService {
 
-    private static final BigDecimal HUNDRED = new BigDecimal("100");
 
     private final NamedParameterJdbcTemplate jdbc;
     private final TransactionRepository repository;
@@ -98,7 +95,7 @@ public class RegistrationService {
         String newStatus = workflow.apply(ctx, "REGISTER", null, user);
 
         long propertyId = ((Number) ctx.property().get("id")).longValue();
-        applyRegisteredOwnership(propertyId, ctx.id(), resultingOwners, today);
+        applyRegisteredOwnership(ctx, propertyId, resultingOwners, today);
 
         byte[] evidenceRoot = Hashes.merkleRoot(List.of(deedHash, TokenService.ownerSetHash(resultingOwners),
                 Hashes.sha256(txnRef)));
@@ -181,75 +178,83 @@ public class RegistrationService {
     }
 
     /**
-     * Registered ownership after the transfer: transferors lose the share they
-     * transferred, transferees gain it. Shares that the source never stated stay
-     * null rather than being invented as an equal split.
+     * Registered ownership after the transfer: the transferring owners (first party) leave the record and the
+     * incoming parties (second party) are added. Shares are not recorded on transactions, so new owners carry
+     * none; owners who are not party to the transfer keep what they had.
      */
     public List<TokenService.Owner> resultingOwners(TransactionContext ctx) {
         Map<String, BigDecimal> shares = new LinkedHashMap<>();
         for (Map<String, Object> owner : ctx.propertyOwners()) {
-            String name = (String) owner.get("owner_name");
-            Object share = owner.get("share_pct");
-            shares.merge(name, share == null ? BigDecimal.ZERO : new BigDecimal(share.toString()), BigDecimal::add);
+            shares.putIfAbsent((String) owner.get("owner_name"), decimal(owner.get("share_pct")));
         }
-
-        BigDecimal transferred = BigDecimal.ZERO;
-        for (Map<String, Object> party : ctx.side("SIDE_1")) {
-            String name = (String) party.get("name");
-            BigDecimal existing = shares.getOrDefault(name, BigDecimal.ZERO);
-            BigDecimal given = decimal(party.get("share_transferred_pct"));
-            if (given == null) {
-                given = existing.signum() > 0 ? existing : BigDecimal.ZERO;
-            }
-            transferred = transferred.add(given);
-            BigDecimal left = existing.subtract(given);
-            if (left.signum() > 0) {
-                shares.put(name, left);
-            } else {
-                shares.remove(name);
-            }
-        }
-
-        List<Map<String, Object>> side2 = ctx.side("SIDE_2");
-        for (Map<String, Object> party : side2) {
-            String name = (String) party.get("name");
-            BigDecimal gained = decimal(party.get("resulting_share_pct"));
-            if (gained == null) {
-                gained = side2.isEmpty() ? BigDecimal.ZERO
-                        : transferred.divide(BigDecimal.valueOf(side2.size()), 4, RoundingMode.HALF_UP);
-            }
-            shares.merge(name, gained, BigDecimal::add);
-        }
+        ctx.side("SIDE_1").forEach(party -> shares.remove((String) party.get("name")));
+        ctx.side("SIDE_2").forEach(party -> shares.put((String) party.get("name"), null));
 
         List<TokenService.Owner> out = new ArrayList<>();
-        for (String name : new LinkedHashSet<>(shares.keySet())) {
-            BigDecimal share = shares.get(name);
-            out.add(new TokenService.Owner(name, share.signum() == 0 ? null : share.min(HUNDRED)));
-        }
+        shares.forEach((name, share) -> out.add(new TokenService.Owner(name, share)));
         if (out.isEmpty()) {
             throw ApiException.conflict("Registration would leave the property without any owner");
         }
         return out;
     }
 
-    private void applyRegisteredOwnership(long propertyId, long transactionId, List<TokenService.Owner> owners,
+    private void applyRegisteredOwnership(TransactionContext ctx, long propertyId, List<TokenService.Owner> owners,
                                           LocalDate effectiveFrom) {
         jdbc.update("""
                 UPDATE core.property_owner SET effective_to = :today
                  WHERE property_id = :propertyId AND effective_to IS NULL
                 """, new MapSqlParameterSource().addValue("propertyId", propertyId).addValue("today", effectiveFrom));
         for (TokenService.Owner owner : owners) {
+            Map<String, Object> d = ownerDetails(ctx, owner.name());
             jdbc.update("""
                     INSERT INTO core.property_owner (property_id, owner_name, share_pct, source, transaction_id,
-                        effective_from)
-                    VALUES (:propertyId, :name, :share, 'REGISTRATION', :txnId, :today)
+                        effective_from, owner_type_code, aadhaar_number, pan, mobile, address, registration_no,
+                        representative_role, representative_name, representative_designation,
+                        representative_aadhaar, representative_pan, representative_mobile)
+                    VALUES (:propertyId, :name, :share, 'REGISTRATION', :txnId,
+                        :today, :ownerType, :aadhaar, :pan, :mobile, :address, :registrationNo,
+                        :repRole, :repName, :repDesignation,
+                        :repAadhaar, :repPan, :repMobile)
                     """, new MapSqlParameterSource()
                     .addValue("propertyId", propertyId)
                     .addValue("name", owner.name())
                     .addValue("share", owner.sharePct())
-                    .addValue("txnId", transactionId)
-                    .addValue("today", effectiveFrom));
+                    .addValue("txnId", ctx.id())
+                    .addValue("today", effectiveFrom)
+                    .addValue("ownerType", d.get("owner_type_code"))
+                    .addValue("aadhaar", d.get("aadhaar_number"))
+                    .addValue("pan", d.get("pan"))
+                    .addValue("mobile", d.get("mobile"))
+                    .addValue("address", d.get("address"))
+                    .addValue("registrationNo", d.get("registration_no"))
+                    .addValue("repRole", d.get("representative_role"))
+                    .addValue("repName", d.get("representative_name"))
+                    .addValue("repDesignation", d.get("representative_designation"))
+                    .addValue("repAadhaar", d.get("representative_aadhaar"))
+                    .addValue("repPan", d.get("representative_pan"))
+                    .addValue("repMobile", d.get("representative_mobile")));
         }
+        ctx.side("SIDE_2").stream()
+                .map(party -> (String) party.get("owner_type_code"))
+                .filter(java.util.Objects::nonNull)
+                .findFirst()
+                .ifPresent(type -> jdbc.update("UPDATE core.property SET owner_type_code = :type WHERE id = :id",
+                        new MapSqlParameterSource().addValue("type", type).addValue("id", propertyId)));
+    }
+
+    /** Type-specific details for a registered owner: from the incoming party, else from the previous owner row. */
+    private static Map<String, Object> ownerDetails(TransactionContext ctx, String name) {
+        for (Map<String, Object> party : ctx.side("SIDE_2")) {
+            if (name.equals(party.get("name"))) {
+                return party;
+            }
+        }
+        for (Map<String, Object> owner : ctx.propertyOwners()) {
+            if (name.equals(owner.get("owner_name"))) {
+                return owner;
+            }
+        }
+        return Map.of();
     }
 
     private byte[] deedHash(TransactionContext ctx, List<TokenService.Owner> owners) {

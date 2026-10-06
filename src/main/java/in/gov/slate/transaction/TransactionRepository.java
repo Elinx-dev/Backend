@@ -39,8 +39,10 @@ public class TransactionRepository {
 
         List<Map<String, Object>> parties = jdbc.queryForList("""
                 SELECT id, side, role, seq, party_type, name, aadhaar_last4, karta_name, pan, address,
-                       relationship_code, existing_share_pct, share_transferred_pct, extent_transferred,
-                       resulting_share_pct, authority_poa_reference,
+                       relationship_code, extent_transferred, authority_poa_reference, owner_type_code,
+                       mobile, registration_no, representative_role, representative_name,
+                       representative_designation, representative_aadhaar_last4, representative_pan,
+                       representative_mobile,
                        property_owner_id, (aadhaar_hash IS NOT NULL) AS aadhaar_captured
                   FROM core.transaction_party WHERE transaction_id = :txnId ORDER BY side, seq
                 """, txnParam);
@@ -88,7 +90,10 @@ public class TransactionRepository {
                 """, txnParam);
 
         List<Map<String, Object>> owners = jdbc.queryForList("""
-                SELECT owner_type_code, owner_name, aadhaar_number, pan, address, share_pct, source FROM core.property_owner
+                SELECT owner_type_code, owner_name, aadhaar_number, pan, mobile, address, registration_no,
+                       representative_role, representative_name, representative_designation, representative_aadhaar,
+                       representative_pan, representative_mobile, share_pct, source
+                  FROM core.property_owner
                  WHERE property_id = :propertyId AND effective_to IS NULL ORDER BY id
                 """, propParam);
 
