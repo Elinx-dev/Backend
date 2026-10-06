@@ -100,7 +100,7 @@ public class EcRuleEngine implements RuleEngine {
         boolean blocking = blockingReasons.contains(evaluation.reason());
 
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("summary", blocking ? evaluation.summary() + " Pre-registration is stopped." : evaluation.summary());
+        payload.put("summary", evaluation.summary());
         payload.put("blocking", blocking);
         payload.put("advisory", !blocking);
         payload.put("searchedWith", searched);
