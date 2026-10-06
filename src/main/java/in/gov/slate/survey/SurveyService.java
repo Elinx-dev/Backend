@@ -37,6 +37,7 @@ import jakarta.validation.constraints.NotNull;
 @Service
 public class SurveyService {
 
+    private static final BigDecimal MAX_VARIANCE_PCT = new BigDecimal("99999999.9999");
     private static final BigDecimal HUNDRED = new BigDecimal("100");
 
     private final NamedParameterJdbcTemplate jdbc;
@@ -182,16 +183,27 @@ public class SurveyService {
             throw ApiException.conflict("Survey can only be submitted while the transaction is SURVEY_PENDING");
         }
 
-        BigDecimal recordedExtent = new BigDecimal(ctx.property().get("extent_value").toString());
-        BigDecimal variance = recordedExtent.signum() == 0 ? BigDecimal.ZERO
-                : req.measuredExtent().subtract(recordedExtent).abs()
-                .divide(recordedExtent, 6, RoundingMode.HALF_UP).multiply(HUNDRED)
-                .setScale(4, RoundingMode.HALF_UP);
-        boolean withinTolerance = variance.compareTo(defaultTolerancePct) <= 0;
-
         Long visitId = jdbc.query("""
-                SELECT id FROM survey.site_visit WHERE transaction_id = :txnId ORDER BY id DESC LIMIT 1
+                SELECT id FROM survey.site_visit
+                 WHERE transaction_id = :txnId AND status IN ('ACCEPTED','COMPLETED')
+                 ORDER BY id DESC LIMIT 1
                 """, new MapSqlParameterSource("txnId", ctx.id()), rs -> rs.next() ? rs.getLong(1) : null);
+        if (visitId == null) {
+            throw ApiException.conflict("Book a site-visit slot with the VAO before submitting the survey");
+        }
+        validateCoordinates(req);
+
+        BigDecimal recordedExtent = new BigDecimal(ctx.property().get("extent_value").toString());
+        String recordedUnit = (String) ctx.property().get("extent_unit");
+        String measuredUnit = req.extentUnit() == null || req.extentUnit().isBlank()
+                ? recordedUnit : AreaUnits.code(req.extentUnit());
+        BigDecimal measuredInRecordUnit = AreaUnits.convert(req.measuredExtent(), measuredUnit, recordedUnit);
+        BigDecimal variance = recordedExtent.signum() == 0 ? BigDecimal.ZERO
+                : measuredInRecordUnit.subtract(recordedExtent).abs()
+                .divide(recordedExtent, 6, RoundingMode.HALF_UP).multiply(HUNDRED)
+                .setScale(4, RoundingMode.HALF_UP)
+                .min(MAX_VARIANCE_PCT);
+        boolean withinTolerance = variance.compareTo(defaultTolerancePct) <= 0;
 
         var keyHolder = new GeneratedKeyHolder();
         jdbc.update("""
@@ -199,10 +211,12 @@ public class SurveyService {
                     subdivision_no, old_survey_reference, fmb_sketch_reference, authoritative_recorded_extent,
                     measured_extent, extent_unit, variance_pct, tolerance_pct, within_tolerance, survey_date,
                     centroid_lat, centroid_lon, boundary_north, boundary_south, boundary_east, boundary_west,
-                    site_notes, resulting_parcel_count, submitted_by, attestation_user_ref, routed_to)
+                    site_notes, resulting_parcel_count, submitted_by, attestation_user_ref, routed_to,
+                    measured_extent_in_record_unit, boundary_geojson)
                 VALUES (:stateCode, :txnId, :visitId, :purpose, :surveyNo, :subdivisionNo, :oldSurveyRef, :fmb,
                     :recordedExtent, :measuredExtent, :extentUnit, :variance, :tolerance, :within, :surveyDate,
-                    :lat, :lon, :north, :south, :east, :west, :notes, :parcelCount, :userId, :attestation, :routedTo)
+                    :lat, :lon, :north, :south, :east, :west, :notes, :parcelCount, :userId, :attestation, :routedTo,
+                    :measuredInRecordUnit, cast(:geojson AS jsonb))
                 """, new MapSqlParameterSource()
                 .addValue("stateCode", ctx.transaction().get("state_code"))
                 .addValue("txnId", ctx.id())
@@ -214,7 +228,9 @@ public class SurveyService {
                 .addValue("fmb", req.fmbSketchReference())
                 .addValue("recordedExtent", recordedExtent)
                 .addValue("measuredExtent", req.measuredExtent())
-                .addValue("extentUnit", req.extentUnit() != null ? req.extentUnit() : ctx.property().get("extent_unit"))
+                .addValue("extentUnit", measuredUnit)
+                .addValue("measuredInRecordUnit", measuredInRecordUnit)
+                .addValue("geojson", polygonGeoJson(req.boundaryPoints()))
                 .addValue("variance", variance)
                 .addValue("tolerance", defaultTolerancePct)
                 .addValue("within", withinTolerance)
@@ -233,16 +249,22 @@ public class SurveyService {
                 keyHolder, new String[]{"id"});
         long submissionId = keyHolder.getKey().longValue();
 
+        if (withinTolerance) {
+            jdbc.update("UPDATE survey.site_visit SET status = 'COMPLETED' WHERE id = :id",
+                    new MapSqlParameterSource("id", visitId));
+        }
         saveSegments(submissionId, req.segments());
         saveBoundaryPoints(submissionId, req.boundaryPoints());
         List<Map<String, Object>> childTokens = saveParcels(ctx, submissionId, req.parcels());
 
         audit.record("SURVEY_SUBMITTED", "SURVEY_SUBMISSION", String.valueOf(submissionId), txnRef, ctx.propertyRef(),
-                Map.of("measuredExtent", req.measuredExtent(), "variancePct", variance,
+                Map.of("measuredExtent", req.measuredExtent(), "extentUnit", String.valueOf(measuredUnit),
+                        "variancePct", variance,
                         "withinTolerance", withinTolerance), null);
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("submissionId", submissionId);
+        out.put("measuredExtentInRecordUnit", measuredInRecordUnit);
         out.put("variancePct", variance);
         out.put("tolerancePct", defaultTolerancePct);
         out.put("withinTolerance", withinTolerance);
@@ -263,6 +285,44 @@ public class SurveyService {
                     + "review before the Revenue queue.");
         }
         return out;
+    }
+
+    private static void validateCoordinates(SubmissionRequest req) {
+        if (req.measuredExtent().signum() <= 0) {
+            throw ApiException.badRequest("Measured extent must be greater than zero");
+        }
+        requireCoordinate(req.centroidLat(), 90, "Latitude");
+        requireCoordinate(req.centroidLon(), 180, "Longitude");
+        if (req.boundaryPoints() != null) {
+            for (BoundaryPointInput point : req.boundaryPoints()) {
+                requireCoordinate(point.latitude(), 90, "Polygon latitude");
+                requireCoordinate(point.longitude(), 180, "Polygon longitude");
+            }
+        }
+    }
+
+    private static void requireCoordinate(BigDecimal value, int limit, String label) {
+        if (value != null && value.abs().compareTo(BigDecimal.valueOf(limit)) > 0) {
+            throw ApiException.badRequest(label + " must be between -" + limit + " and " + limit);
+        }
+    }
+
+    /** The polygon vertices as a closed GeoJSON ring, or null when fewer than three were captured. */
+    private String polygonGeoJson(List<BoundaryPointInput> points) {
+        if (points == null) {
+            return null;
+        }
+        List<List<BigDecimal>> ring = new ArrayList<>();
+        for (BoundaryPointInput point : points) {
+            if (point.latitude() != null && point.longitude() != null) {
+                ring.add(List.of(point.longitude(), point.latitude()));
+            }
+        }
+        if (ring.size() < 3) {
+            return null;
+        }
+        ring.add(ring.get(0));
+        return json(Map.of("type", "Polygon", "coordinates", List.of(ring)));
     }
 
     /** When a surveyor was assigned at initiation, only that surveyor may act as SURVEYOR. */
