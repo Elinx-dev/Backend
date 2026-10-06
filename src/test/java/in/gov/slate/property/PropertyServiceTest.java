@@ -201,7 +201,7 @@ class PropertyServiceTest {
     @Test
     void unspecifiedOwnerTypesUseDefaultFields() {
         var society = new PropertyService.OwnerInput("Adyar Co-op Society", "123412341234", "AAAAS1234S",
-                null, "Adyar", null, null);
+                "9876543210", "Adyar", null, null);
         assertThatCode(() -> PropertyService.validateOwners("SOCIETY", false, List.of(society)))
                 .doesNotThrowAnyException();
         assertThatThrownBy(() -> PropertyService.validateOwners("ALIEN", true, List.of(society)))

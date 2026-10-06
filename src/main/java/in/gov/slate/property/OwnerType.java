@@ -46,7 +46,7 @@ public enum OwnerType {
         }
 
         public boolean ownerMobile() {
-            return this == INDIVIDUAL;
+            return this == INDIVIDUAL || this == DEFAULT;
         }
 
         public boolean registrationNo() {

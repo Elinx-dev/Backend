@@ -309,7 +309,7 @@ public class PropertyService {
         long id = ((Number) property.get("id")).longValue();
         var idParam = new MapSqlParameterSource("propertyId", id);
         property.put("registeredOwners", jdbc.queryForList("""
-                SELECT owner_type_code, owner_name, aadhaar_number, pan, mobile, address, registration_no,
+                SELECT id, owner_type_code, owner_name, aadhaar_number, pan, mobile, address, registration_no,
                        representative_role, representative_name, representative_designation,
                        representative_aadhaar, representative_pan, representative_mobile,
                        share_pct, share_note, source, effective_from

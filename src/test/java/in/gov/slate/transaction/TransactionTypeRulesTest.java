@@ -25,7 +25,7 @@ class TransactionTypeRulesTest {
 
     private static TransactionService.PartyInput party(String side, String type, String relationship) {
         return new TransactionService.PartyInput(side, null, type, side + " name", null, null, null, null, null,
-                relationship, null, null, null, null, null);
+                relationship, null, null, null, null, null, null);
     }
 
     @Test
