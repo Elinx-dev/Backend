@@ -55,7 +55,9 @@ public class TransactionService {
                                 BigDecimal extentOrShareTransferred, String extentUnit,
                                 String relationshipCategory, String basisOfSettlement,
                                 BigDecimal shareBeingReleased, Integer resultingSubparcelCount,
-                                BigDecimal guidelineValue, String guidelineValueReference) {
+                                BigDecimal guidelineValue, String guidelineValueReference,
+                                Boolean subdivisionRequired, Boolean surveyRequiredByParty,
+                                Long surveyorUserId, String surveyLocationType) {
     }
 
     public record DetailsRequest(BigDecimal declaredConsideration, String modeOfConsideration,
@@ -81,7 +83,7 @@ public class TransactionService {
         user.requirePermission("TXN_CREATE");
 
         var propertyRows = jdbc.queryForList(
-                "SELECT id, property_ref, sro_code, district_code FROM core.property WHERE property_ref = :ref AND state_code = :state",
+                "SELECT id, property_ref, sro_code, district_code, owner_type_code FROM core.property WHERE property_ref = :ref AND state_code = :state",
                 new MapSqlParameterSource().addValue("ref", req.propertyRef()).addValue("state", user.stateCode()));
         if (propertyRows.isEmpty()) {
             throw ApiException.notFound("Property " + req.propertyRef());
@@ -89,8 +91,35 @@ public class TransactionService {
         Map<String, Object> property = propertyRows.get(0);
 
         Map<String, Object> deedType = config.deedType(user.stateCode(), req.deedTypeCode());
-        String transferScope = resolveTransferScope(req.deedTypeCode(), req.subtype(), req.transferScope());
-        boolean surveyRequired = SurveyRequirement.derive((String) deedType.get("survey_rule"), transferScope);
+        String transferScope;
+        boolean surveyRequired;
+        boolean subdivisionRequired = false;
+        boolean surveyRequiredByParty = false;
+        String relationshipCategory = req.relationshipCategory();
+        Long surveyorUserId = null;
+        String surveyLocationType = null;
+        if (config.isConfiguredTransactionType(user.stateCode(), req.deedTypeCode())) {
+            Map<String, Object> transactionType = config.transactionType(user.stateCode(), req.deedTypeCode());
+            if (transactionType == null) {
+                throw ApiException.badRequest("Transaction type " + req.deedTypeCode() + " is not active");
+            }
+            var decision = TransactionTypeRules.decide(transactionType, req.subdivisionRequired(),
+                    req.surveyRequiredByParty(), req.transferScope(), (String) property.get("owner_type_code"));
+            transferScope = decision.transferScope();
+            surveyRequired = decision.surveyRequired();
+            subdivisionRequired = decision.subdivisionRequired();
+            surveyRequiredByParty = decision.surveyRequiredByParty();
+            if (Boolean.TRUE.equals(transactionType.get("blood_relation_required"))) {
+                relationshipCategory = "FAMILY";
+            }
+            if (surveyRequired) {
+                surveyorUserId = requireSurveyor(user.stateCode(), req.surveyorUserId());
+                surveyLocationType = requireSurveyLocation(user.stateCode(), req.surveyLocationType());
+            }
+        } else {
+            transferScope = resolveTransferScope(req.deedTypeCode(), req.subtype(), req.transferScope());
+            surveyRequired = SurveyRequirement.derive((String) deedType.get("survey_rule"), transferScope);
+        }
 
         Map<String, Object> wf = config.workflow(user.stateCode(), req.deedTypeCode());
         String txnRef = numbering.next(user.stateCode(), "TXN_REF", (String) property.get("district_code"));
@@ -111,14 +140,18 @@ public class TransactionService {
                 .addValue("modeOfConsideration", req.modeOfConsideration())
                 .addValue("extentOrShareTransferred", req.extentOrShareTransferred())
                 .addValue("extentUnit", req.extentUnit())
-                .addValue("relationshipCategory", req.relationshipCategory())
+                .addValue("relationshipCategory", relationshipCategory)
                 .addValue("basisOfSettlement", req.basisOfSettlement())
                 .addValue("shareBeingReleased", req.shareBeingReleased())
                 .addValue("resultingSubparcelCount", req.resultingSubparcelCount())
                 .addValue("guidelineValue", req.guidelineValue())
                 .addValue("guidelineValueReference", req.guidelineValueReference())
                 .addValue("idempotencyKey", UUID.randomUUID())
-                .addValue("initiatedBy", user.id());
+                .addValue("initiatedBy", user.id())
+                .addValue("subdivisionRequired", subdivisionRequired)
+                .addValue("surveyRequiredByParty", surveyRequiredByParty)
+                .addValue("surveyorUserId", surveyorUserId)
+                .addValue("surveyLocationType", surveyLocationType);
 
         jdbc.update("""
                 INSERT INTO core.transaction (state_code, txn_ref, property_id, deed_type_code, subtype,
@@ -126,18 +159,49 @@ public class TransactionService {
                     sro_code, remarks, declared_consideration, mode_of_consideration,
                     extent_or_share_transferred, extent_unit, relationship_category, basis_of_settlement,
                     share_being_released, resulting_subparcel_count, guideline_value,
-                    guideline_value_reference, idempotency_key, initiated_by)
+                    guideline_value_reference, idempotency_key, initiated_by,
+                    subdivision_required, survey_required_by_party, assigned_surveyor_id, survey_location_type)
                 VALUES (:stateCode, :txnRef, :propertyId, :deedTypeCode, :subtype,
                     :workflowId, :configVersion, :transferScope, :surveyRequired, 'DRAFT', 'PROPERTY_IDENTIFICATION',
                     :sroCode, :remarks, :declaredConsideration, :modeOfConsideration,
                     :extentOrShareTransferred, :extentUnit, :relationshipCategory, :basisOfSettlement,
                     :shareBeingReleased, :resultingSubparcelCount, :guidelineValue,
-                    :guidelineValueReference, :idempotencyKey, :initiatedBy)
+                    :guidelineValueReference, :idempotencyKey, :initiatedBy,
+                    :subdivisionRequired, :surveyRequiredByParty, :surveyorUserId, :surveyLocationType)
                 """, params);
 
         audit.record("TRANSACTION_CREATED", "TRANSACTION", txnRef, txnRef, (String) property.get("property_ref"),
-                Map.of("deedType", req.deedTypeCode(), "surveyRequired", surveyRequired), null);
+                Map.of("deedType", req.deedTypeCode(), "surveyRequired", surveyRequired,
+                        "subdivisionRequired", subdivisionRequired, "surveyRequiredByParty", surveyRequiredByParty),
+                null);
         return detail(txnRef);
+    }
+
+    public List<Map<String, Object>> surveyors() {
+        CurrentUser user = CurrentUser.require();
+        return config.surveyors(user.stateCode());
+    }
+
+    private long requireSurveyor(String stateCode, Long surveyorUserId) {
+        if (surveyorUserId == null) {
+            throw ApiException.badRequest("Select a surveyor; this transaction needs a survey");
+        }
+        boolean known = config.surveyors(stateCode).stream()
+                .anyMatch(s -> surveyorUserId.equals(((Number) s.get("id")).longValue()));
+        if (!known) {
+            throw ApiException.badRequest("User " + surveyorUserId + " is not an active surveyor");
+        }
+        return surveyorUserId;
+    }
+
+    private String requireSurveyLocation(String stateCode, String locationType) {
+        if (locationType == null || locationType.isBlank()) {
+            throw ApiException.badRequest("Select the survey location type so the survey fee can be applied");
+        }
+        if (config.surveyFee(stateCode, locationType) == null) {
+            throw ApiException.badRequest("No active survey fee for location type " + locationType);
+        }
+        return locationType;
     }
 
     /**
@@ -209,6 +273,8 @@ public class TransactionService {
         if (!ctx.consents().isEmpty()) {
             throw ApiException.conflict("Parties cannot be replaced after consent has been requested");
         }
+        TransactionTypeRules.validateParties(ctx.deedType(), parties,
+                code -> config.isActiveBloodRelation(user.stateCode(), code));
 
         jdbc.update("DELETE FROM core.transaction_party WHERE transaction_id = :id",
                 new MapSqlParameterSource("id", ctx.id()));
@@ -307,6 +373,13 @@ public class TransactionService {
         out.put("payments", ctx.payments());
         out.put("registeredOwners", ctx.propertyOwners());
         out.put("surveyParcels", ctx.surveyParcels());
+        Object surveyorId = ctx.transaction().get("assigned_surveyor_id");
+        out.put("assignedSurveyor", surveyorId == null ? null : config.surveyors(user.stateCode()).stream()
+                .filter(s -> ((Number) s.get("id")).longValue() == ((Number) surveyorId).longValue())
+                .findFirst().orElse(null));
+        Object locationType = ctx.transaction().get("survey_location_type");
+        out.put("surveyFeeConfig", locationType == null ? null
+                : config.surveyFee(user.stateCode(), (String) locationType));
         out.put("availableActions", workflow.availableActions(ctx, user));
         out.put("validation", validation.evaluate(ctx, "TRANSACTION", false));
         out.put("stages", config.workflow(user.stateCode(), ctx.deedTypeCode()).get("stages"));

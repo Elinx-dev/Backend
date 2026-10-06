@@ -1,5 +1,6 @@
 package in.gov.slate.config;
 
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +32,9 @@ public class ConfigService {
         out.put("state", state(stateCode));
         out.put("modules", modules(stateCode));
         out.put("deedTypes", deedTypes(stateCode));
+        out.put("transactionTypes", transactionTypes(stateCode));
+        out.put("surveyFees", surveyFees(stateCode));
+        out.put("bloodRelations", bloodRelations(stateCode));
         out.put("optionSets", optionSets());
         out.put("relationships", jdbc.queryForList(
                 "SELECT code, name, fee_category, sort_order FROM master.relationship ORDER BY sort_order",
@@ -87,11 +91,98 @@ public class ConfigService {
                 """, new MapSqlParameterSource("stateCode", stateCode));
     }
 
+    /** Transaction Type Master rows for the state; a state row overrides the '*' default. */
+    public List<Map<String, Object>> transactionTypes(String stateCode) {
+        return jdbc.queryForList("""
+                SELECT DISTINCT ON (code) code, name, first_party_label, second_party_label,
+                       subdivision_allowed, individuals_only, blood_relation_required, display_order, status
+                  FROM master.transaction_type
+                 WHERE state_code IN (:stateCode, '*') AND status = 'ACTIVE'
+                 ORDER BY code, (state_code = '*')
+                """, new MapSqlParameterSource("stateCode", stateCode)).stream()
+                .sorted(Comparator.comparingInt(r -> ((Number) r.get("display_order")).intValue()))
+                .toList();
+    }
+
+    /** The active transaction type, or null when the code is not in the Transaction Type Master. */
+    public Map<String, Object> transactionType(String stateCode, String code) {
+        return transactionTypes(stateCode).stream()
+                .filter(t -> code != null && code.equals(t.get("code")))
+                .findFirst().orElse(null);
+    }
+
+    public boolean isConfiguredTransactionType(String stateCode, String code) {
+        Integer count = jdbc.queryForObject("""
+                SELECT count(*) FROM master.transaction_type
+                 WHERE state_code IN (:stateCode, '*') AND code = :code
+                """, new MapSqlParameterSource().addValue("stateCode", stateCode).addValue("code", code),
+                Integer.class);
+        return count != null && count > 0;
+    }
+
+    public List<Map<String, Object>> surveyFees(String stateCode) {
+        return jdbc.queryForList("""
+                SELECT DISTINCT ON (location_type) location_type, location_name, fee, land_type_code,
+                       display_order, status
+                  FROM master.survey_fee
+                 WHERE state_code IN (:stateCode, '*') AND status = 'ACTIVE'
+                 ORDER BY location_type, (state_code = '*')
+                """, new MapSqlParameterSource("stateCode", stateCode)).stream()
+                .sorted(Comparator.comparingInt(r -> ((Number) r.get("display_order")).intValue()))
+                .toList();
+    }
+
+    /** The active Survey Fee Master row for a location type, or null. */
+    public Map<String, Object> surveyFee(String stateCode, String locationType) {
+        return surveyFees(stateCode).stream()
+                .filter(f -> locationType != null && locationType.equals(f.get("location_type")))
+                .findFirst().orElse(null);
+    }
+
+    public List<Map<String, Object>> bloodRelations(String stateCode) {
+        return jdbc.queryForList("""
+                SELECT DISTINCT ON (code) code, relationship_name, display_order, status
+                  FROM master.blood_relation
+                 WHERE state_code IN (:stateCode, '*') AND status = 'ACTIVE'
+                 ORDER BY code, (state_code = '*')
+                """, new MapSqlParameterSource("stateCode", stateCode)).stream()
+                .sorted(Comparator.comparingInt(r -> ((Number) r.get("display_order")).intValue()))
+                .toList();
+    }
+
+    public boolean isActiveBloodRelation(String stateCode, String code) {
+        return code != null && bloodRelations(stateCode).stream().anyMatch(r -> code.equals(r.get("code")));
+    }
+
+    /** Active users holding the SURVEYOR role in the state. */
+    public List<Map<String, Object>> surveyors(String stateCode) {
+        return jdbc.queryForList("""
+                SELECT u.id, u.username, u.full_name, u.designation,
+                       string_agg(DISTINCT coalesce(j.village_code, j.taluk_code, j.district_code), ', ') AS jurisdiction
+                  FROM sec.user u
+                  JOIN sec.user_role ur ON ur.user_id = u.id
+                  JOIN sec.role r ON r.id = ur.role_id AND r.code = 'SURVEYOR'
+                  LEFT JOIN sec.user_jurisdiction j ON j.user_id = u.id
+                 WHERE u.state_code = :stateCode AND u.status = 'ACTIVE'
+                 GROUP BY u.id, u.username, u.full_name, u.designation
+                 ORDER BY u.full_name
+                """, new MapSqlParameterSource("stateCode", stateCode));
+    }
+
     public Map<String, Object> deedType(String stateCode, String code) {
         var rows = jdbc.queryForList("""
-                SELECT code, name, workflow_family, survey_rule, side1_role, side2_role,
-                       witness_required, min_witness_count, requires_relationship_category
-                  FROM master.deed_type WHERE state_code = :stateCode AND code = :code
+                SELECT d.code, coalesce(tt.name, d.name) AS name, d.workflow_family, d.survey_rule,
+                       coalesce(upper(replace(tt.first_party_label, ' ', '_')), d.side1_role) AS side1_role,
+                       coalesce(upper(replace(tt.second_party_label, ' ', '_')), d.side2_role) AS side2_role,
+                       d.witness_required, d.min_witness_count, d.requires_relationship_category,
+                       tt.first_party_label, tt.second_party_label, tt.subdivision_allowed,
+                       tt.individuals_only, tt.blood_relation_required
+                  FROM master.deed_type d
+                  LEFT JOIN LATERAL (
+                       SELECT * FROM master.transaction_type t
+                        WHERE t.code = d.code AND t.state_code IN (d.state_code, '*')
+                        ORDER BY (t.state_code = '*') LIMIT 1) tt ON true
+                 WHERE d.state_code = :stateCode AND d.code = :code
                 """, new MapSqlParameterSource().addValue("stateCode", stateCode).addValue("code", code));
         if (rows.isEmpty()) {
             throw ApiException.notFound("Deed type " + code + " for state " + stateCode);
