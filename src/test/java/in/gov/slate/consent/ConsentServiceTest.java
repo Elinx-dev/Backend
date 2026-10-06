@@ -28,6 +28,7 @@ import in.gov.slate.common.CurrentUser;
 import in.gov.slate.connectors.AadhaarConnector;
 import in.gov.slate.transaction.TransactionContext;
 import in.gov.slate.transaction.TransactionRepository;
+import in.gov.slate.transaction.TransactionService;
 import in.gov.slate.transaction.WorkflowEngine;
 
 @ExtendWith(MockitoExtension.class)
@@ -43,13 +44,15 @@ class ConsentServiceTest {
     private WorkflowEngine workflow;
     @Mock
     private AuditService audit;
+    @Mock
+    private TransactionService transactions;
 
     private ConsentService service;
     private CurrentUser user;
 
     @BeforeEach
     void setUp() {
-        service = new ConsentService(jdbc, aadhaar, repository, workflow, audit);
+        service = new ConsentService(jdbc, aadhaar, repository, workflow, audit, transactions);
         user = new CurrentUser(1L, "ro.adyar", "R. Anandhi", "TN", "REGISTRATION",
                 Set.of("REGISTRATION_OFFICER"), Set.of("CONSENT_CAPTURE"), Set.of("ADYAR"), Set.of());
         SecurityContextHolder.getContext().setAuthentication(

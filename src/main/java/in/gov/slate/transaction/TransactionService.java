@@ -451,7 +451,85 @@ public class TransactionService {
     }
 
     private static String twelveDigits(String value) {
-        return value != null && AADHAAR.matcher(value).matches() ? value : null;
+        if (value == null) {
+            return null;
+        }
+        String compact = value.replaceAll("[\\s-]", "");
+        return AADHAAR.matcher(compact).matches() ? compact : null;
+    }
+
+    public record PartyAadhaarInput(String aadhaarNumber) {
+    }
+
+    /** Records Aadhaar for a party that has none on record so consent OTP can be requested. */
+    @Transactional
+    public Map<String, Object> savePartyAadhaar(String txnRef, long partyId, String aadhaarNumber) {
+        CurrentUser user = CurrentUser.require();
+        user.requirePermission("TXN_EDIT");
+        TransactionContext ctx = repository.load(txnRef, user.stateCode());
+        if (!List.of("DRAFT", "CONSENT_PENDING").contains(ctx.status())) {
+            throw ApiException.conflict("Transaction " + ctx.txnRef() + " is " + ctx.status()
+                    + "; Aadhaar can only be added before consent is complete");
+        }
+        Map<String, Object> party = ctx.parties().stream()
+                .filter(p -> ((Number) p.get("id")).longValue() == partyId)
+                .findFirst()
+                .orElseThrow(() -> ApiException.notFound("Party " + partyId + " on " + txnRef));
+        if (Boolean.TRUE.equals(party.get("aadhaar_captured"))) {
+            throw ApiException.conflict("Party " + party.get("name") + " already has Aadhaar on record");
+        }
+        String aadhaar = twelveDigits(aadhaarNumber);
+        if (aadhaar == null) {
+            throw ApiException.badRequest("Aadhaar must contain exactly 12 digits");
+        }
+        storePartyAadhaar(ctx.id(), partyId, aadhaar);
+        audit.record("PARTY_AADHAAR_CAPTURED", "TRANSACTION", String.valueOf(ctx.id()), txnRef, ctx.propertyRef(),
+                Map.of("partyId", partyId), null);
+        return detail(txnRef);
+    }
+
+    /**
+     * Owner-derived parties saved while the owner's Aadhaar was missing or badly formatted pick it
+     * up again from the current owner record. Returns true when any party was updated.
+     */
+    @Transactional
+    public boolean fillMissingOwnerAadhaar(TransactionContext ctx) {
+        boolean updated = false;
+        for (Map<String, Object> party : ctx.parties()) {
+            if (Boolean.TRUE.equals(party.get("aadhaar_captured")) || party.get("property_owner_id") == null) {
+                continue;
+            }
+            List<Map<String, Object>> owners = jdbc.queryForList(
+                    "SELECT aadhaar_number, representative_aadhaar FROM core.property_owner WHERE id = :id",
+                    new MapSqlParameterSource("id", ((Number) party.get("property_owner_id")).longValue()));
+            if (owners.isEmpty()) {
+                continue;
+            }
+            String aadhaar = twelveDigits((String) owners.get(0).get("aadhaar_number"));
+            if (aadhaar == null) {
+                aadhaar = twelveDigits((String) owners.get(0).get("representative_aadhaar"));
+            }
+            if (aadhaar != null) {
+                storePartyAadhaar(ctx.id(), ((Number) party.get("id")).longValue(), aadhaar);
+                updated = true;
+            }
+        }
+        return updated;
+    }
+
+    private void storePartyAadhaar(long txnId, long partyId, String aadhaar) {
+        jdbc.update("""
+                UPDATE core.transaction_party
+                   SET aadhaar_hash = :hash, aadhaar_last4 = :last4, aadhaar_salt_ref = :saltRef,
+                       representative_aadhaar_last4 = CASE WHEN representative_role IS NOT NULL
+                           THEN :last4 ELSE representative_aadhaar_last4 END
+                 WHERE id = :partyId AND transaction_id = :txnId
+                """, new MapSqlParameterSource()
+                .addValue("hash", hashAadhaar(aadhaar))
+                .addValue("last4", last4(aadhaar))
+                .addValue("saltRef", aadhaarSaltRef)
+                .addValue("partyId", partyId)
+                .addValue("txnId", txnId));
     }
 
     @Transactional

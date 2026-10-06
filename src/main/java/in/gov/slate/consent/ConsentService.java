@@ -16,6 +16,7 @@ import in.gov.slate.common.CurrentUser;
 import in.gov.slate.connectors.AadhaarConnector;
 import in.gov.slate.transaction.TransactionContext;
 import in.gov.slate.transaction.TransactionRepository;
+import in.gov.slate.transaction.TransactionService;
 import in.gov.slate.transaction.WorkflowEngine;
 
 /**
@@ -30,14 +31,17 @@ public class ConsentService {
     private final TransactionRepository repository;
     private final WorkflowEngine workflow;
     private final AuditService audit;
+    private final TransactionService transactions;
 
     public ConsentService(NamedParameterJdbcTemplate jdbc, AadhaarConnector aadhaar,
-                          TransactionRepository repository, WorkflowEngine workflow, AuditService audit) {
+                          TransactionRepository repository, WorkflowEngine workflow, AuditService audit,
+                          TransactionService transactions) {
         this.jdbc = jdbc;
         this.aadhaar = aadhaar;
         this.repository = repository;
         this.workflow = workflow;
         this.audit = audit;
+        this.transactions = transactions;
     }
 
     @Transactional
@@ -45,6 +49,9 @@ public class ConsentService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("CONSENT_CAPTURE");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
+        if (transactions.fillMissingOwnerAadhaar(ctx)) {
+            ctx = repository.load(txnRef, user.stateCode());
+        }
         if ("DRAFT".equals(ctx.status())) {
             workflow.apply(ctx, "REQUEST_CONSENT", null, user);
             ctx = repository.load(txnRef, user.stateCode());

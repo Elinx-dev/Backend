@@ -130,7 +130,8 @@ public class WorkflowEngine {
                     .map(party -> String.valueOf(party.get("name")))
                     .toList();
             if (!partiesWithoutAadhaar.isEmpty()) {
-                missing.add("Aadhaar for: " + String.join(", ", partiesWithoutAadhaar));
+                missing.add("no Aadhaar on record for " + String.join(", ", partiesWithoutAadhaar)
+                        + " (enter it on the Aadhaar consent tab)");
             }
             return "Cannot request consent: " + String.join("; ", missing);
         }
