@@ -91,6 +91,7 @@ public class SurveyService {
                                     List<BoundaryPointInput> boundaryPoints, List<ParcelInput> parcels) {
     }
 
+    /** Books the caller's own visit slot; the other officer doesn't need to accept it. */
     @Transactional
     public Map<String, Object> proposeVisit(String txnRef, VisitRequest req) {
         CurrentUser user = CurrentUser.require();
@@ -99,52 +100,22 @@ public class SurveyService {
         requireAssignedSurveyor(ctx, user);
         String role = req.role() != null ? req.role() : (user.hasRole("VAO") ? "VAO" : "SURVEYOR");
 
-        var existing = jdbc.queryForList("""
-                SELECT id, status, proposed_by_role FROM survey.site_visit
-                 WHERE transaction_id = :txnId AND status IN ('PROPOSED','COUNTER_PROPOSED')
-                 ORDER BY id DESC LIMIT 1
-                """, new MapSqlParameterSource("txnId", ctx.id()));
-
-        if (!existing.isEmpty() && !role.equals(existing.get(0).get("proposed_by_role"))) {
-            long visitId = ((Number) existing.get(0).get("id")).longValue();
-            jdbc.update("""
-                    UPDATE survey.site_visit SET counter_visit_date = :date, counter_visit_time = :time,
-                           counter_by_role = :role, status = 'COUNTER_PROPOSED'
-                     WHERE id = :id
-                    """, new MapSqlParameterSource().addValue("id", visitId).addValue("date", req.visitDate())
-                    .addValue("time", req.visitTime()).addValue("role", role));
-            audit.record("SURVEY_VISIT_COUNTER_PROPOSED", "SITE_VISIT", String.valueOf(visitId), txnRef,
-                    ctx.propertyRef(), Map.of("visitDate", req.visitDate().toString()), null);
-            return visit(visitId);
-        }
-
         var keyHolder = new GeneratedKeyHolder();
         jdbc.update("""
                 INSERT INTO survey.site_visit (state_code, transaction_id, proposed_by_role, proposed_by_user_id,
-                    visit_date, visit_time, status)
-                VALUES (:stateCode, :txnId, :role, :userId, :date, :time, 'PROPOSED')
+                    visit_date, visit_time, status, visit_purpose, accepted_at)
+                VALUES (:stateCode, :txnId, :role, :userId, :date, :time, 'ACCEPTED', :purpose, now())
                 """, new MapSqlParameterSource()
                 .addValue("stateCode", ctx.transaction().get("state_code"))
                 .addValue("txnId", ctx.id())
                 .addValue("role", role)
+                .addValue("purpose", "VAO".equals(role) ? "FIELD_VERIFICATION" : "FIELD_SURVEY")
                 .addValue("userId", user.id())
                 .addValue("date", req.visitDate())
                 .addValue("time", req.visitTime()), keyHolder, new String[]{"id"});
         long visitId = keyHolder.getKey().longValue();
-        audit.record("SURVEY_VISIT_PROPOSED", "SITE_VISIT", String.valueOf(visitId), txnRef, ctx.propertyRef(),
+        audit.record("SURVEY_VISIT_BOOKED", "SITE_VISIT", String.valueOf(visitId), txnRef, ctx.propertyRef(),
                 Map.of("visitDate", req.visitDate().toString(), "role", role), null);
-        return visit(visitId);
-    }
-
-    @Transactional
-    public Map<String, Object> acceptVisit(String txnRef, long visitId) {
-        CurrentUser user = CurrentUser.require();
-        user.requirePermission("SURVEY_SCHEDULE");
-        TransactionContext ctx = repository.load(txnRef, user.stateCode());
-        jdbc.update("UPDATE survey.site_visit SET status = 'ACCEPTED', accepted_at = now() WHERE id = :id AND transaction_id = :txnId",
-                new MapSqlParameterSource().addValue("id", visitId).addValue("txnId", ctx.id()));
-        audit.record("SURVEY_VISIT_ACCEPTED", "SITE_VISIT", String.valueOf(visitId), txnRef, ctx.propertyRef(),
-                Map.of("visitId", visitId), null);
         return visit(visitId);
     }
 
@@ -185,11 +156,12 @@ public class SurveyService {
 
         Long visitId = jdbc.query("""
                 SELECT id FROM survey.site_visit
-                 WHERE transaction_id = :txnId AND status IN ('ACCEPTED','COMPLETED')
+                 WHERE transaction_id = :txnId AND visit_purpose = 'FIELD_SURVEY'
+                   AND status IN ('ACCEPTED','COMPLETED')
                  ORDER BY id DESC LIMIT 1
                 """, new MapSqlParameterSource("txnId", ctx.id()), rs -> rs.next() ? rs.getLong(1) : null);
         if (visitId == null) {
-            throw ApiException.conflict("Book a site-visit slot with the VAO before submitting the survey");
+            throw ApiException.conflict("Book your site-visit slot before submitting the survey");
         }
         validateCoordinates(req);
 

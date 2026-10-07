@@ -17,10 +17,9 @@ import in.gov.slate.common.ApiException;
 public final class SiteVisitSupport {
 
     public static final DateTimeFormatter HH_MM = DateTimeFormatter.ofPattern("HH:mm");
-    public static final List<String> OPEN_VISIT_STATUSES = List.of("PROPOSED", "COUNTER_PROPOSED");
     public static final Set<String> BOOKED_VISIT_STATUSES = Set.of("ACCEPTED", "COMPLETED");
 
-    /** The date and time both parties are currently looking at: the counter-proposal when there is one. */
+    /** The booked date and time; visits negotiated before V122 may still carry a counter-proposal. */
     public static final String AGREED_DATE = "COALESCE(v.counter_visit_date, v.visit_date)";
     public static final String AGREED_TIME =
             "CASE WHEN v.counter_visit_date IS NOT NULL THEN v.counter_visit_time ELSE v.visit_time END";
@@ -45,12 +44,9 @@ public final class SiteVisitSupport {
         }
     }
 
-    /** Whose turn it is on an open proposal: the proposer, or the role that countered it. */
-    public static String lastMover(Map<String, Object> row) {
-        return "COUNTER_PROPOSED".equals(row.get("visit_status"))
-                ? (String) row.get("counter_by_role")
-                : (String) row.get("proposed_by_role");
-    }
+    /** The Surveyor books FIELD_SURVEY visits and the VAO books FIELD_VERIFICATION visits, independently. */
+    public static final String SURVEY_VISIT = "FIELD_SURVEY";
+    public static final String VERIFICATION_VISIT = "FIELD_VERIFICATION";
 
     public static boolean slotBooked(Map<String, Object> row) {
         Object status = row.get("visit_status");

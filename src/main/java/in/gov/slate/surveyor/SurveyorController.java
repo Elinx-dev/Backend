@@ -59,11 +59,6 @@ public class SurveyorController {
         return surveyor.book(txnRef, body);
     }
 
-    @PostMapping("/records/{txnRef}/visits/{visitId}/accept")
-    public Map<String, Object> accept(@PathVariable String txnRef, @PathVariable long visitId) {
-        return surveyor.accept(txnRef, visitId);
-    }
-
     @PostMapping("/records/{txnRef}/visits/{visitId}/check-in")
     public Map<String, Object> checkIn(@PathVariable String txnRef, @PathVariable long visitId) {
         return surveyor.checkIn(txnRef, visitId);
