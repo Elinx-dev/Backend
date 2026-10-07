@@ -134,14 +134,15 @@ public class RevenueService {
     }
 
     /**
-     * A VAO may only verify a record once a site-visit slot has been booked (accepted),
+     * A VAO may only verify a record once his own field-verification slot is booked,
      * and only the VAO the record is assigned to may verify it.
      */
     private void requireVisitSlotBooked(long transactionId, CurrentUser user) {
         var params = new MapSqlParameterSource().addValue("txnId", transactionId).addValue("userId", user.id());
         Boolean booked = jdbc.queryForObject("""
                 SELECT EXISTS (SELECT 1 FROM survey.site_visit
-                                WHERE transaction_id = :txnId AND status IN ('ACCEPTED','COMPLETED'))
+                                WHERE transaction_id = :txnId AND visit_purpose = 'FIELD_VERIFICATION'
+                                  AND status IN ('ACCEPTED','COMPLETED'))
                 """, params, Boolean.class);
         if (!Boolean.TRUE.equals(booked)) {
             throw ApiException.conflict("Book a site-visit slot before verifying this record");

@@ -27,23 +27,6 @@ class SurveyorStageTest {
     }
 
     @Test
-    void vaoProposalIsTheSurveyorsTurn() {
-        Map<String, Object> row = row("SURVEY_PENDING", "PROPOSED");
-        row.put("proposed_by_role", "VAO");
-        assertThat(SurveyorStage.of(row, TODAY)).isEqualTo(SurveyorStage.VAO_PROPOSED);
-    }
-
-    @Test
-    void ownCounterProposalWaitsForTheVao() {
-        Map<String, Object> row = row("SURVEY_PENDING", "COUNTER_PROPOSED");
-        row.put("proposed_by_role", "VAO");
-        row.put("counter_by_role", "SURVEYOR");
-        SurveyorStage stage = SurveyorStage.of(row, TODAY);
-        assertThat(stage).isEqualTo(SurveyorStage.SURVEYOR_COUNTERED);
-        assertThat(stage.actionRequired()).isFalse();
-    }
-
-    @Test
     void bookedSlotMovesToCheckInOnTheDayAndThenTheSurveyForm() {
         Map<String, Object> row = row("SURVEY_PENDING", "ACCEPTED");
         row.put("agreed_date", "2026-10-09");

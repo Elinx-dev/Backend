@@ -16,7 +16,8 @@ public final class ApprovalChecklist {
             m.id AS mutation_id, m.status AS mutation_status, m.vao_verified_at, t.survey_required,
             rr.registered_document_no, sub.within_tolerance, sub.variance_pct,
             EXISTS (SELECT 1 FROM survey.site_visit v
-                     WHERE v.transaction_id = t.id AND v.status IN ('ACCEPTED','COMPLETED')) AS visit_booked,
+                     WHERE v.transaction_id = t.id AND v.visit_purpose = 'FIELD_VERIFICATION'
+                       AND v.status IN ('ACCEPTED','COMPLETED')) AS visit_booked,
             (SELECT count(*) FROM revenue.objection o
               WHERE o.mutation_id = m.id AND o.disposal_decision IS NULL) AS open_objections
             """;

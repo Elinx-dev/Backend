@@ -53,11 +53,6 @@ public class VaoController {
         return vao.book(txnRef, body);
     }
 
-    @PostMapping("/records/{txnRef}/visits/{visitId}/accept")
-    public Map<String, Object> accept(@PathVariable String txnRef, @PathVariable long visitId) {
-        return vao.accept(txnRef, visitId);
-    }
-
     @PostMapping("/records/{txnRef}/visits/{visitId}/check-in")
     public Map<String, Object> checkIn(@PathVariable String txnRef, @PathVariable long visitId) {
         return vao.checkIn(txnRef, visitId);

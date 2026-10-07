@@ -2,9 +2,7 @@ package in.gov.slate.surveyor;
 
 import static in.gov.slate.survey.SiteVisitSupport.AGREED_DATE;
 import static in.gov.slate.survey.SiteVisitSupport.AGREED_TIME;
-import static in.gov.slate.survey.SiteVisitSupport.BOOKED_VISIT_STATUSES;
 import static in.gov.slate.survey.SiteVisitSupport.HH_MM;
-import static in.gov.slate.survey.SiteVisitSupport.OPEN_VISIT_STATUSES;
 
 import java.math.BigDecimal;
 import java.sql.Time;
@@ -30,8 +28,8 @@ import in.gov.slate.transaction.TransactionRepository;
 import in.gov.slate.vao.VaoService;
 
 /**
- * Records assigned to the signed-in Surveyor, their joint site-visit slots with the VAO and
- * the field survey. A record is the Surveyor's when it is assigned to them, unassigned and in
+ * Records assigned to the signed-in Surveyor, the Surveyor's own site-visit slots and the
+ * field survey. A record is the Surveyor's when it is assigned to them, unassigned and in
  * one of their villages, or when they submitted its survey.
  */
 @Service
@@ -64,7 +62,7 @@ public class SurveyorService {
               LEFT JOIN LATERAL (SELECT pm.* FROM revenue.proposed_mutation pm
                                   WHERE pm.transaction_id = t.id ORDER BY pm.id DESC LIMIT 1) m ON TRUE
               LEFT JOIN LATERAL (SELECT sv.* FROM survey.site_visit sv
-                                  WHERE sv.transaction_id = t.id AND sv.visit_purpose = 'JOINT_SURVEY'
+                                  WHERE sv.transaction_id = t.id AND sv.visit_purpose = 'FIELD_SURVEY'
                                   ORDER BY sv.id DESC LIMIT 1) v ON TRUE
               LEFT JOIN LATERAL (SELECT ss.* FROM survey.submission ss
                                   WHERE ss.transaction_id = t.id ORDER BY ss.id DESC LIMIT 1) s ON TRUE
@@ -183,13 +181,16 @@ public class SurveyorService {
         return out;
     }
 
-    /** The Surveyor's slot grid for a date; a slot is taken when one of their joint visits is planned then. */
+    /** The Surveyor's slot grid for a date; a slot is taken when one of their survey visits is booked then. */
     public Map<String, Object> slots(LocalDate date) {
         CurrentUser user = requireSurveyor();
         return SiteVisitSupport.slotGrid(visitSlots, visitsOn(user, date, null), date);
     }
 
-    /** Proposes, counter-proposes or accepts the joint site visit with the VAO while the survey is pending. */
+    /**
+     * Books (or, before check-in, reschedules) the Surveyor's own survey slot. The VAO isn't
+     * involved: the slot is booked as soon as the Surveyor picks it.
+     */
     @Transactional
     public Map<String, Object> book(String txnRef, VaoService.BookingRequest req) {
         CurrentUser user = requireSurveyor();
@@ -202,44 +203,32 @@ public class SurveyorService {
         long txnId = ((Number) row.get("transaction_id")).longValue();
         requireSlotFree(user, req.visitDate(), req.visitTime(), txnId);
 
-        String visitStatus = (String) row.get("visit_status");
-        Long visitId = row.get("visit_id") == null ? null : ((Number) row.get("visit_id")).longValue();
-        var params = new MapSqlParameterSource()
-                .addValue("txnId", txnId).addValue("userId", user.id()).addValue("stateCode", user.stateCode())
-                .addValue("date", req.visitDate()).addValue("time", req.visitTime()).addValue("id", visitId);
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("stateCode", user.stateCode())
+                .addValue("txnId", txnId)
+                .addValue("userId", user.id())
+                .addValue("date", req.visitDate())
+                .addValue("time", req.visitTime())
+                .addValue("id", row.get("visit_id"));
         String action;
-        if (visitStatus != null && BOOKED_VISIT_STATUSES.contains(visitStatus)) {
-            throw ApiException.conflict("The joint site visit is already booked for this record");
-        }
-        if (visitStatus != null && OPEN_VISIT_STATUSES.contains(visitStatus)) {
-            boolean vaoTurn = "VAO".equals(SiteVisitSupport.lastMover(row));
-            boolean sameSlot = req.visitDate().toString().equals(row.get("agreed_date"))
-                    && req.visitTime().format(HH_MM).equals(row.get("agreed_time"));
-            if (vaoTurn && sameSlot) {
-                acceptVisit(params);
-                action = "SITE_VISIT_ACCEPTED";
-            } else if (vaoTurn || "COUNTER_PROPOSED".equals(visitStatus)) {
-                jdbc.update("""
-                        UPDATE survey.site_visit SET counter_visit_date = :date, counter_visit_time = :time,
-                               counter_by_role = 'SURVEYOR', status = 'COUNTER_PROPOSED', surveyor_user_id = :userId
-                         WHERE id = :id
-                        """, params);
-                action = "SITE_VISIT_COUNTER_PROPOSED";
-            } else {
-                jdbc.update("""
-                        UPDATE survey.site_visit SET visit_date = :date, visit_time = :time, surveyor_user_id = :userId
-                         WHERE id = :id
-                        """, params);
-                action = "SITE_VISIT_PROPOSED";
-            }
+        if ("ACCEPTED".equals(row.get("visit_status")) && row.get("surveyor_checkin_at") == null) {
+            jdbc.update("""
+                    UPDATE survey.site_visit SET visit_date = :date, visit_time = :time, counter_visit_date = NULL,
+                           counter_visit_time = NULL, counter_by_role = NULL, surveyor_user_id = :userId,
+                           accepted_at = now()
+                     WHERE id = :id
+                    """, params);
+            action = "SITE_VISIT_RESCHEDULED";
+        } else if (SiteVisitSupport.slotBooked(row)) {
+            throw ApiException.conflict("Your survey visit for this record is already attended");
         } else {
             jdbc.update("""
                     INSERT INTO survey.site_visit (state_code, transaction_id, proposed_by_role, proposed_by_user_id,
-                        visit_date, visit_time, status, visit_purpose, surveyor_user_id, vao_user_id)
-                    VALUES (:stateCode, :txnId, 'SURVEYOR', :userId, :date, :time, 'PROPOSED', 'JOINT_SURVEY',
-                            :userId, (SELECT assigned_vao_id FROM core.transaction WHERE id = :txnId))
+                        visit_date, visit_time, status, visit_purpose, surveyor_user_id, accepted_at)
+                    VALUES (:stateCode, :txnId, 'SURVEYOR', :userId, :date, :time, 'ACCEPTED', 'FIELD_SURVEY',
+                            :userId, now())
                     """, params);
-            action = "SITE_VISIT_PROPOSED";
+            action = "SITE_VISIT_BOOKED";
         }
 
         claim(txnId, user);
@@ -247,31 +236,6 @@ public class SurveyorService {
                 Map.of("visitDate", req.visitDate().toString(), "visitTime", req.visitTime().format(HH_MM),
                         "role", "SURVEYOR"),
                 req.remarks());
-        return loadRecord(user, txnRef);
-    }
-
-    /** Accepts the VAO's proposed (or counter-proposed) date as the booked slot. */
-    @Transactional
-    public Map<String, Object> accept(String txnRef, long visitId) {
-        CurrentUser user = requireSurveyor();
-        user.requirePermission("SURVEY_SCHEDULE");
-        Map<String, Object> row = loadRecord(user, txnRef);
-        Map<String, Object> visit = requireVisit(row, visitId);
-        if (!OPEN_VISIT_STATUSES.contains((String) visit.get("status"))) {
-            throw ApiException.conflict("Only a proposed visit can be accepted");
-        }
-        String lastMover = "COUNTER_PROPOSED".equals(visit.get("status"))
-                ? (String) visit.get("counter_by_role") : (String) visit.get("proposed_by_role");
-        if ("SURVEYOR".equals(lastMover)) {
-            throw ApiException.conflict("Waiting for the VAO to respond to your proposal");
-        }
-        long txnId = ((Number) row.get("transaction_id")).longValue();
-        requireSlotFree(user, LocalDate.parse(visit.get("agreed_date").toString()),
-                ((Time) visit.get("agreed_time")).toLocalTime(), txnId);
-        acceptVisit(new MapSqlParameterSource().addValue("id", visitId).addValue("userId", user.id()));
-        claim(txnId, user);
-        audit.record("SITE_VISIT_ACCEPTED", "SITE_VISIT", String.valueOf(visitId), txnRef,
-                (String) row.get("property_ref"), Map.of("visitId", visitId, "role", "SURVEYOR"), null);
         return loadRecord(user, txnRef);
     }
 
@@ -304,19 +268,12 @@ public class SurveyorService {
         CurrentUser user = requireSurveyor();
         Map<String, Object> row = loadRecord(user, txnRef);
         if (!Boolean.TRUE.equals(row.get("can_survey"))) {
-            throw ApiException.conflict("Book a site-visit slot with the VAO before submitting the survey");
+            throw ApiException.conflict("Book your site-visit slot before submitting the survey");
         }
         Map<String, Object> out = new LinkedHashMap<>(survey.submit(txnRef, req));
         claim(((Number) row.get("transaction_id")).longValue(), user);
         out.put("record", loadRecord(user, txnRef));
         return out;
-    }
-
-    private void acceptVisit(MapSqlParameterSource params) {
-        jdbc.update("""
-                UPDATE survey.site_visit SET status = 'ACCEPTED', accepted_at = now(), surveyor_user_id = :userId
-                 WHERE id = :id
-                """, params);
     }
 
     private void claim(long txnId, CurrentUser user) {
@@ -334,7 +291,7 @@ public class SurveyorService {
         }
     }
 
-    /** Open and booked joint visits on a date for the Surveyor, optionally excluding one transaction. */
+    /** The Surveyor's booked survey visits on a date, optionally excluding one transaction. */
     private List<Map<String, Object>> visitsOn(CurrentUser user, LocalDate date, Long excludeTxnId) {
         MapSqlParameterSource params = scope(user).addValue("date", date)
                 .addValue("exclude", excludeTxnId == null ? -1L : excludeTxnId);
@@ -344,8 +301,7 @@ public class SurveyorService {
                   JOIN core.transaction t ON t.id = v.transaction_id
                   JOIN core.property p ON p.id = t.property_id
                  WHERE t.state_code = :stateCode AND t.id <> :exclude
-                   AND v.visit_purpose = 'JOINT_SURVEY'
-                   AND v.status IN ('PROPOSED','COUNTER_PROPOSED','ACCEPTED')
+                   AND v.visit_purpose = 'FIELD_SURVEY' AND v.status = 'ACCEPTED'
                    AND v.surveyor_checkin_at IS NULL
                    AND %s = :date AND %s IS NOT NULL
                    AND (v.surveyor_user_id = :userId OR t.assigned_surveyor_id = :userId)
@@ -364,7 +320,7 @@ public class SurveyorService {
     private Map<String, Object> requireVisit(Map<String, Object> row, long visitId) {
         var rows = jdbc.queryForList("""
                 SELECT v.*, %s AS agreed_date, %s AS agreed_time FROM survey.site_visit v
-                 WHERE v.id = :id AND v.transaction_id = :txnId
+                 WHERE v.id = :id AND v.transaction_id = :txnId AND v.visit_purpose = 'FIELD_SURVEY'
                 """.formatted(AGREED_DATE, AGREED_TIME),
                 new MapSqlParameterSource().addValue("id", visitId).addValue("txnId", row.get("transaction_id")));
         if (rows.isEmpty()) {

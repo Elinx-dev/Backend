@@ -20,33 +20,17 @@ class VisitStageTest {
     }
 
     @Test
-    void recordWithoutVisitNeedsABooking() {
-        VisitStage stage = VisitStage.of(row("SURVEY_PENDING", null), TODAY);
+    void surveyPendingRecordsWaitForTheSurveyor() {
+        VisitStage stage = VisitStage.of(row("SURVEY_PENDING", "ACCEPTED"), TODAY);
+        assertThat(stage).isEqualTo(VisitStage.WITH_SURVEYOR);
+        assertThat(stage.actionRequired()).isFalse();
+    }
+
+    @Test
+    void recordWithTheVaoNeedsTheVaosOwnBooking() {
+        VisitStage stage = VisitStage.of(row("VAO_PENDING", null), TODAY);
         assertThat(stage).isEqualTo(VisitStage.AWAITING_PROPOSAL);
         assertThat(stage.actionRequired()).isTrue();
-    }
-
-    @Test
-    void surveyorProposalIsTheVaosTurn() {
-        Map<String, Object> row = row("SURVEY_PENDING", "PROPOSED");
-        row.put("proposed_by_role", "SURVEYOR");
-        assertThat(VisitStage.of(row, TODAY)).isEqualTo(VisitStage.SURVEYOR_PROPOSED);
-
-        row.put("visit_status", "COUNTER_PROPOSED");
-        row.put("counter_by_role", "VAO");
-        assertThat(VisitStage.of(row, TODAY)).isEqualTo(VisitStage.VAO_COUNTERED);
-        assertThat(VisitStage.of(row, TODAY).actionRequired()).isFalse();
-    }
-
-    @Test
-    void bookedVisitBecomesCheckInDueOnTheVisitDate() {
-        Map<String, Object> row = row("SURVEY_PENDING", "ACCEPTED");
-        row.put("agreed_date", "2026-10-10");
-        assertThat(VisitStage.of(row, TODAY)).isEqualTo(VisitStage.SLOT_BOOKED);
-        row.put("agreed_date", "2026-10-08");
-        assertThat(VisitStage.of(row, TODAY)).isEqualTo(VisitStage.CHECK_IN_DUE);
-        row.put("vao_checkin_at", "2026-10-08T10:31:00Z");
-        assertThat(VisitStage.of(row, TODAY)).isEqualTo(VisitStage.VISIT_DONE);
     }
 
     @Test
