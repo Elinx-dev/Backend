@@ -206,7 +206,7 @@ public class ConfigService {
                        coalesce(upper(replace(tt.second_party_label, ' ', '_')), d.side2_role) AS side2_role,
                        d.witness_required, d.min_witness_count, d.requires_relationship_category,
                        tt.first_party_label, tt.second_party_label, tt.subdivision_allowed,
-                       tt.individuals_only, tt.blood_relation_required
+                       tt.individuals_only, tt.blood_relation_required, tt.owner_side
                   FROM master.deed_type d
                   LEFT JOIN LATERAL (
                        SELECT * FROM master.transaction_type t
@@ -383,7 +383,7 @@ public class ConfigService {
     public Map<String, Object> ruleEngineConfig(String stateCode, String engine) {
         var rows = jdbc.queryForList("""
                 SELECT engine, ec_lookback_years, extent_tolerance_pct, supported_land_types, enabled,
-                       blocking_reason_codes
+                       blocking_reason_codes, apply_survey_lineage
                   FROM cfg.rule_engine_config WHERE state_code = :stateCode AND engine = :engine
                 """, new MapSqlParameterSource().addValue("stateCode", stateCode).addValue("engine", engine));
         return rows.isEmpty() ? Map.of("enabled", false) : rows.get(0);
