@@ -2,6 +2,7 @@ package in.gov.slate.connectors;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.core.io.ClassPathResource;
@@ -29,6 +30,12 @@ public class MockFixtureStore {
         this.revenueFixtures = load(mapper, "mock/revenue-fixtures.json",
                 new TypeReference<RevenueOwnershipResponse>() {
                 });
+        // A record covering several survey rows is found by any of them.
+        for (RevenueOwnershipResponse record : List.copyOf(revenueFixtures.values())) {
+            for (var parcel : record.allParcels()) {
+                revenueFixtures.putIfAbsent(key(record.village(), parcel.surveyNo(), parcel.subdivisionNo()), record);
+            }
+        }
     }
 
     /** Keys starting with an underscore document the fixture file and are not lookups. */

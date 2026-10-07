@@ -563,8 +563,6 @@ public class PropertyService {
                            SELECT jsonb_agg(jsonb_build_object(
                                       'name', party.name,
                                       'role', party.role,
-                                      'existingSharePct', party.existing_share_pct,
-                                      'shareTransferredPct', party.share_transferred_pct,
                                       'extentTransferred', party.extent_transferred
                                   ) ORDER BY party.seq)
                              FROM core.transaction_party party
@@ -579,8 +577,6 @@ public class PropertyService {
                            SELECT jsonb_agg(jsonb_build_object(
                                       'name', party.name,
                                       'role', party.role,
-                                      'shareTransferredPct', party.share_transferred_pct,
-                                      'resultingSharePct', party.resulting_share_pct,
                                       'extentTransferred', party.extent_transferred
                                   ) ORDER BY party.seq)
                              FROM core.transaction_party party
