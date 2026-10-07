@@ -15,6 +15,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import in.gov.slate.common.ApiException;
+import in.gov.slate.tahsildar.ApprovalChecklist;
 import in.gov.slate.common.AuditEvent;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
@@ -216,7 +217,7 @@ public class RevenueService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("REVENUE_APPROVE");
         Map<String, Object> mutation = detail(mutationId);
-        requireStatus(mutation, "TAHSILDAR_PENDING");
+        requireApprovalReady(mutationId);
 
         TransactionContext ctx = repository.load((String) mutation.get("txn_ref"), user.stateCode());
         MutationPushResponse pushed = connector.pushMutation(new MutationPushRequest(
@@ -283,6 +284,29 @@ public class RevenueService {
             return AuditEvent.DECISION_APPROVED;
         }
         return null;
+    }
+
+    /** Locks the mutation so a second, concurrent approval sees it already approved. */
+    private void requireApprovalReady(long mutationId) {
+        var rows = jdbc.queryForList("SELECT " + ApprovalChecklist.READINESS_COLUMNS + """
+                  FROM revenue.proposed_mutation m
+                  JOIN core.transaction t ON t.id = m.transaction_id
+                """ + ApprovalChecklist.READINESS_JOINS + """
+                 WHERE m.id = :id
+                   FOR UPDATE OF m
+                """, new MapSqlParameterSource("id", mutationId));
+        if (rows.isEmpty()) {
+            throw ApiException.notFound("Mutation " + mutationId);
+        }
+        Map<String, Object> readiness = rows.get(0);
+        if (!"TAHSILDAR_PENDING".equals(readiness.get("mutation_status"))) {
+            throw ApiException.conflict("Mutation is " + readiness.get("mutation_status")
+                    + "; only TAHSILDAR_PENDING mutations can be approved");
+        }
+        List<String> failed = ApprovalChecklist.failed(ApprovalChecklist.evaluate(readiness));
+        if (!failed.isEmpty()) {
+            throw ApiException.conflict("Cannot approve yet: " + String.join(", ", failed));
+        }
     }
 
     private String registeredDocumentNo(long transactionId) {

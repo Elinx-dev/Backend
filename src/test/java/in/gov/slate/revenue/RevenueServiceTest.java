@@ -88,6 +88,9 @@ class RevenueServiceTest {
 
         when(jdbc.queryForList(anyString(), any(SqlParameterSource.class))).thenAnswer(invocation -> {
             String sql = invocation.getArgument(0);
+            if (sql.contains("visit_booked")) {
+                return List.of(readyForApproval());
+            }
             return sql.contains("SELECT m.*") ? List.of(mutation) : List.of();
         });
         when(repository.load("TXN-TN-2026-000002", "TN")).thenReturn(context);
@@ -122,5 +125,51 @@ class RevenueServiceTest {
                 .hasMessageContaining("Book a site-visit slot");
         org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never())
                 .update(argThat(sql -> sql.contains("UPDATE revenue.proposed_mutation")), any(SqlParameterSource.class));
+    }
+
+    @Test
+    void tahsildarCannotApproveBeforeVaoVerification() {
+        Map<String, Object> mutation = Map.of("id", 3L, "status", "TAHSILDAR_PENDING",
+                "txn_ref", "TXN-TN-2026-000003", "property_id", 11L);
+        Map<String, Object> notVerified = new java.util.HashMap<>(readyForApproval());
+        notVerified.remove("vao_verified_at");
+        when(jdbc.queryForList(anyString(), any(SqlParameterSource.class))).thenAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+            if (sql.contains("visit_booked")) {
+                return List.of(notVerified);
+            }
+            return sql.contains("SELECT m.*") ? List.of(mutation) : List.of();
+        });
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        service.approve(3L, new RevenueService.ApprovalRequest(null, null)))
+                .hasMessageContaining("VAO verified");
+        org.mockito.Mockito.verifyNoInteractions(connector);
+    }
+
+    @Test
+    void secondApprovalOfAnApprovedMutationIsRefused() {
+        Map<String, Object> mutation = Map.of("id", 4L, "status", "TAHSILDAR_PENDING",
+                "txn_ref", "TXN-TN-2026-000004", "property_id", 12L);
+        Map<String, Object> approved = new java.util.HashMap<>(readyForApproval());
+        approved.put("mutation_status", "REVENUE_APPROVED");
+        when(jdbc.queryForList(anyString(), any(SqlParameterSource.class))).thenAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+            if (sql.contains("visit_booked")) {
+                return List.of(approved);
+            }
+            return sql.contains("SELECT m.*") ? List.of(mutation) : List.of();
+        });
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        service.approve(4L, new RevenueService.ApprovalRequest(null, null)))
+                .hasMessageContaining("REVENUE_APPROVED");
+        org.mockito.Mockito.verifyNoInteractions(connector);
+    }
+
+    private static Map<String, Object> readyForApproval() {
+        return Map.of("mutation_status", "TAHSILDAR_PENDING", "vao_verified_at", "2026-10-01T10:00:00Z",
+                "survey_required", false, "registered_document_no", "DOC/2026/13",
+                "visit_booked", true, "open_objections", 0L);
     }
 }
