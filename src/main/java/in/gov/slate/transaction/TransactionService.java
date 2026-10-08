@@ -127,7 +127,8 @@ public class TransactionService {
             var decision = TransactionTypeRules.decide(transactionType, req.subdivisionRequired(),
                     req.surveyRequiredByParty(), req.transferScope(), (String) property.get("owner_type_code"));
             transferScope = decision.transferScope();
-            surveyRequired = decision.surveyRequired();
+            // Partition always goes to Survey after Registration.
+            surveyRequired = decision.surveyRequired() || "PARTITION".equals(req.deedTypeCode());
             subdivisionRequired = decision.subdivisionRequired();
             surveyRequiredByParty = decision.surveyRequiredByParty();
             Object defaultCategory = transactionType.get("default_relationship_category");

@@ -62,7 +62,8 @@ public class ConsentService {
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> party : ctx.parties()) {
             long partyId = ((Number) party.get("id")).longValue();
-            if (partyIds != null && !partyIds.isEmpty() && !partyIds.contains(partyId)) {
+            if (partyIds != null && !partyIds.isEmpty() && !partyIds.contains(partyId)
+                    || Boolean.TRUE.equals(party.get("deceased"))) {
                 continue;
             }
             if (!Boolean.TRUE.equals(party.get("aadhaar_captured"))) {
@@ -190,6 +191,7 @@ public class ConsentService {
                 .map(consent -> ((Number) consent.get("party_id")).longValue())
                 .toList();
         return ctx.parties().stream()
+                .filter(party -> !Boolean.TRUE.equals(party.get("deceased")))
                 .allMatch(party -> verifiedPartyIds.contains(((Number) party.get("id")).longValue()));
     }
 }

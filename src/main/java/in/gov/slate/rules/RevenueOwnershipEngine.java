@@ -115,6 +115,12 @@ public class RevenueOwnershipEngine implements RuleEngine {
             return notChecked("PROPERTY_DATA_MISSING", searched, missing, List.of());
         }
         OwnerSide ownerSide = ownerSide(ctx);
+        if ("DECEASED_OWNER_EVIDENCE_INCOMPLETE".equals(ownerSide.problemReason())) {
+            Outcome outcome = notChecked(ownerSide.problemReason(), searched, ownerSide.problemNote(), List.of());
+            Map<String, Object> payload = new LinkedHashMap<>(outcome.payload());
+            payload.put("advisory", false);
+            return new Outcome("REVIEW_REQUIRED", ownerSide.problemReason(), payload);
+        }
         if (ownerSide.problemReason() != null) {
             return notChecked(ownerSide.problemReason(), searched, ownerSide.problemNote(), List.of());
         }
@@ -651,7 +657,17 @@ public class RevenueOwnershipEngine implements RuleEngine {
         Set<Long> verified = new HashSet<>();
         ctx.consents().stream().filter(c -> "VERIFIED".equals(c.get("status")))
                 .forEach(c -> verified.add(((Number) c.get("party_id")).longValue()));
+        List<String> missingEvidence = parties.stream()
+                .filter(p -> Boolean.TRUE.equals(p.get("deceased"))
+                        && !Boolean.TRUE.equals(p.get("deceased_evidence_complete")))
+                .map(p -> (String) p.get("name")).toList();
+        if (!missingEvidence.isEmpty()) {
+            return new OwnerSide(List.of(), "DECEASED_OWNER_EVIDENCE_INCOMPLETE",
+                    "Death certificate or legal heir certificate is not uploaded for deceased owner "
+                            + String.join(", ", missingEvidence));
+        }
         List<String> pending = parties.stream()
+                .filter(p -> !Boolean.TRUE.equals(p.get("deceased")))
                 .filter(p -> !verified.contains(((Number) p.get("id")).longValue())
                         || Boolean.FALSE.equals(p.get("aadhaar_captured")))
                 .map(p -> (String) p.get("name")).toList();

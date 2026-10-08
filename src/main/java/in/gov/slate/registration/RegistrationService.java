@@ -187,7 +187,11 @@ public class RegistrationService {
         for (Map<String, Object> owner : ctx.propertyOwners()) {
             shares.putIfAbsent((String) owner.get("owner_name"), decimal(owner.get("share_pct")));
         }
-        ctx.side("SIDE_1").forEach(party -> shares.remove((String) party.get("name")));
+        // A Partition keeps living co-owners; only deceased owners leave, replaced by their heirs.
+        boolean partition = "PARTITION".equals(ctx.deedTypeCode());
+        ctx.side("SIDE_1").stream()
+                .filter(party -> !partition || Boolean.TRUE.equals(party.get("deceased")))
+                .forEach(party -> shares.remove((String) party.get("name")));
         ctx.side("SIDE_2").forEach(party -> shares.put((String) party.get("name"), null));
 
         List<TokenService.Owner> out = new ArrayList<>();
