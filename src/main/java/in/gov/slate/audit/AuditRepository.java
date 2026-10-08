@@ -53,6 +53,15 @@ public class AuditRepository {
                 .addValue("offset", filter.offset()));
     }
 
+    public boolean recordExists(String transactionRef, String propertyRef, String stateCode) {
+        String sql = transactionRef != null
+                ? "SELECT EXISTS (SELECT 1 FROM core.transaction WHERE txn_ref = :ref AND state_code = :stateCode)"
+                : "SELECT EXISTS (SELECT 1 FROM core.property WHERE property_ref = :ref AND state_code = :stateCode)";
+        return Boolean.TRUE.equals(jdbc.queryForObject(sql, new MapSqlParameterSource()
+                .addValue("ref", transactionRef != null ? transactionRef : propertyRef)
+                .addValue("stateCode", stateCode), Boolean.class));
+    }
+
     public long count(AuditFilter filter, String stateCode) {
         Where where = where(filter, stateCode);
         Long total = jdbc.queryForObject("SELECT count(*) FROM sec.audit_log a WHERE " + where.clause(),

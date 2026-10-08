@@ -72,7 +72,10 @@ public class AuditQueryService {
         return row;
     }
 
-    /** Timeline for one transaction or property, used by the detail screens. */
+    /**
+     * Timeline for one transaction or property, used by the detail screens. Anyone who may open
+     * the record (it is in their state) sees all of its business events, not only their own.
+     */
     public List<Map<String, Object>> timeline(String transactionRef, String propertyRef, Integer size,
                                                String requestedState) {
         CurrentUser user = CurrentUser.require();
@@ -80,11 +83,15 @@ public class AuditQueryService {
             throw ApiException.badRequest("A transactionRef or propertyRef is required for a timeline");
         }
         Target target = target(user, requestedState);
+        if (!repository.recordExists(transactionRef, propertyRef, target.stateCode())) {
+            throw ApiException.notFound(transactionRef != null ? "Transaction " + transactionRef
+                    : "Property " + propertyRef);
+        }
         AuditFilter filter = AuditFilter.builder()
                 .transactionRef(transactionRef)
                 .propertyRef(propertyRef)
                 .size(size == null ? 100 : size)
-                .scope(user, target.stateWide())
+                .scope(user, true)
                 .build();
         return repository.search(filter, target.stateCode());
     }

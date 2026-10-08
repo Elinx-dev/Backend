@@ -101,6 +101,27 @@ class AuditQueryServiceTest {
     }
 
     @Test
+    void anOfficerSeesTheWholeTimelineOfARecordInTheirState() {
+        authenticate(officer());
+        when(repository.recordExists("TXN-TN-1", null, "TN")).thenReturn(true);
+        when(repository.search(any(), eq("TN"))).thenReturn(List.of(Map.of("id", 1L)));
+
+        assertEquals(1, service().timeline("TXN-TN-1", null, null, null).size());
+
+        AuditFilter filter = captureFilter();
+        assertTrue(filter.stateWide());
+        assertEquals("TXN-TN-1", filter.transactionRef());
+    }
+
+    @Test
+    void aTimelineForAnUnknownRecordIsNotFound() {
+        authenticate(officer());
+        when(repository.recordExists(null, "TN-CHN-9", "TN")).thenReturn(false);
+
+        assertThrows(ApiException.class, () -> service().timeline(null, "TN-CHN-9", null, null));
+    }
+
+    @Test
     void exportingIsItselfAudited() {
         authenticate(administrator());
         when(stateScope.resolve(null)).thenReturn("TN");
