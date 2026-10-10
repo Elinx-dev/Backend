@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import in.gov.slate.common.AuditService;
+import in.gov.slate.config.ConfigService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.common.Hashes;
 import in.gov.slate.transaction.TransactionContext;
@@ -38,10 +39,12 @@ public class RuleCheckService {
     private final AuditService audit;
     private final ObjectMapper mapper;
     private final String connectorMode;
+    private final ConfigService config;
 
     public RuleCheckService(NamedParameterJdbcTemplate jdbc, TransactionRepository repository,
                             WorkflowEngine workflow, List<RuleEngine> engines, AuditService audit, ObjectMapper mapper,
-                            @Value("${slate.connectors.mode}") String connectorMode) {
+                            ConfigService config, @Value("${slate.connectors.mode}") String connectorMode) {
+        this.config = config;
         this.jdbc = jdbc;
         this.repository = repository;
         this.workflow = workflow;
@@ -70,7 +73,8 @@ public class RuleCheckService {
             long requestId = createRequest(ctx, engine.engine(), engine.requestPayload(ctx, assessedOn),
                     effectiveMode, assessedOn, user.id());
             RuleEngine.Outcome outcome = engine.run(ctx, requestId, assessedOn, effectiveMode);
-            boolean advisory = !isBlocking(outcome);
+            boolean advisory = !config.ruleResultBlocks((String) ctx.transaction().get("state_code"), engine.engine(),
+                    outcome.overallOutcome(), outcome.reasonCode());
             storeResult(requestId, engine.engine(), outcome, advisory);
 
             Map<String, Object> row = new LinkedHashMap<>();
@@ -110,9 +114,6 @@ public class RuleCheckService {
                 """, new MapSqlParameterSource("txnId", txnId));
     }
 
-    private static boolean isBlocking(RuleEngine.Outcome outcome) {
-        return outcome.payload() != null && Boolean.TRUE.equals(outcome.payload().get("blocking"));
-    }
 
     private long createRequest(TransactionContext ctx, String engine, Map<String, Object> payload, String mode,
                                LocalDate assessmentDate, long userId) {

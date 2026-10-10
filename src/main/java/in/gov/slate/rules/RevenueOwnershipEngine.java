@@ -140,8 +140,7 @@ public class RevenueOwnershipEngine implements RuleEngine {
                         authoritativeLink(ctx, slateSurvey, slateSub, revSurvey, revSub));
         persistNameMatches(requestId, evaluation);
 
-        boolean blocking = config.blockingRuleReasons(stateCode).getOrDefault(engine(), Set.of())
-                .contains(evaluation.reason());
+        boolean blocking = config.ruleResultBlocks(stateCode, engine(), evaluation.outcome(), evaluation.reason());
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("summary", evaluation.summary());
         payload.put("blocking", blocking);
