@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 
 import in.gov.slate.common.ValidationException;
 import in.gov.slate.config.ConfigService;
+import in.gov.slate.config.RuleOutcomePolicy;
 
 /**
  * Evaluates the cross-field rules configured in cfg.validation_rule. Each
@@ -215,13 +216,13 @@ public class ValidationEngine {
                         && predicates.get("ruleChecksPassed").test(ctx));
     }
 
-    /** Latest rule results whose reason code is configured to stop pre-registration for that engine. */
+    /** Latest rule results that the state's rule check outcome policy does not allow to proceed. */
     public List<Map<String, Object>> blockingRuleResults(TransactionContext ctx) {
-        Map<String, java.util.Set<String>> blocking =
-                config.blockingRuleReasons((String) ctx.transaction().get("state_code"));
+        Map<String, RuleOutcomePolicy> policies =
+                config.ruleOutcomePolicies((String) ctx.transaction().get("state_code"));
         return ctx.ruleResults().stream()
-                .filter(r -> blocking.getOrDefault((String) r.get("engine"), java.util.Set.of())
-                        .contains((String) r.get("reason_code")))
+                .filter(r -> policies.getOrDefault((String) r.get("engine"), RuleOutcomePolicy.DEFAULT)
+                        .blocks((String) r.get("overall_outcome"), (String) r.get("reason_code")))
                 .toList();
     }
 

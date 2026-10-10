@@ -269,6 +269,8 @@ public class ConfigService {
            WHERE state_code = :stateCode
            ORDER BY deed_type_code, version DESC
           """, new MapSqlParameterSource("stateCode", stateCode)));
+        out.put("ruleEngines", ruleOutcomePolicyView(stateCode));
+        out.put("ruleCheckCatalog", RuleOutcomePolicy.catalog());
         return out;
           }
 
@@ -389,21 +391,51 @@ public class ConfigService {
         return rows.isEmpty() ? Map.of("enabled", false) : rows.get(0);
     }
 
-    /** Reason codes per engine that stop pre-registration, from cfg.rule_engine_config. */
-    public Map<String, Set<String>> blockingRuleReasons(String stateCode) {
-        Map<String, Set<String>> out = new LinkedHashMap<>();
+    /** Per engine: the outcomes allowed to proceed past Rule checks and the reasons that always stop. */
+    public Map<String, RuleOutcomePolicy> ruleOutcomePolicies(String stateCode) {
+        Map<String, RuleOutcomePolicy> out = new LinkedHashMap<>();
         jdbc.query("""
-                SELECT engine, blocking_reason_codes FROM cfg.rule_engine_config WHERE state_code = :stateCode
+                SELECT engine, allowed_outcomes, blocking_reason_codes FROM cfg.rule_engine_config
+                 WHERE state_code = :stateCode ORDER BY engine
                 """, new MapSqlParameterSource("stateCode", stateCode), rs -> {
-            Set<String> codes = new LinkedHashSet<>();
-            java.sql.Array array = rs.getArray("blocking_reason_codes");
-            if (array != null) {
-                for (Object code : (Object[]) array.getArray()) {
-                    codes.add(String.valueOf(code));
-                }
-            }
-            out.put(rs.getString("engine"), codes);
+            out.put(rs.getString("engine"), new RuleOutcomePolicy(
+                    textSet(rs.getArray("allowed_outcomes")), textSet(rs.getArray("blocking_reason_codes"))));
         });
+        return out;
+    }
+
+    public boolean ruleResultBlocks(String stateCode, String engine, String outcome, String reasonCode) {
+        return ruleOutcomePolicies(stateCode).getOrDefault(engine, RuleOutcomePolicy.DEFAULT)
+                .blocks(outcome, reasonCode);
+    }
+
+    public List<Map<String, Object>> ruleOutcomePolicyView(String stateCode) {
+        return ruleOutcomePolicies(stateCode).entrySet().stream()
+                .map(e -> e.getValue().view(e.getKey())).toList();
+    }
+
+    public RuleOutcomePolicy updateRuleOutcomePolicy(String stateCode, String engine,
+                                                     List<String> allowedOutcomes, List<String> blockingReasonCodes) {
+        RuleOutcomePolicy policy = RuleOutcomePolicy.validated(allowedOutcomes, blockingReasonCodes);
+        int changed = jdbc.update("""
+                UPDATE cfg.rule_engine_config
+                   SET allowed_outcomes = string_to_array(:allowed, ','),
+                       blocking_reason_codes = string_to_array(:blocking, ',')
+                 WHERE state_code = :stateCode AND engine = :engine
+                """, new MapSqlParameterSource().addValue("stateCode", stateCode).addValue("engine", engine)
+                .addValue("allowed", String.join(",", policy.allowedOutcomes()))
+                .addValue("blocking", String.join(",", policy.blockingReasonCodes())));
+        if (changed == 0) throw ApiException.notFound("Rule engine " + engine);
+        return policy;
+    }
+
+    private static Set<String> textSet(java.sql.Array array) throws java.sql.SQLException {
+        Set<String> out = new LinkedHashSet<>();
+        if (array != null) {
+            for (Object value : (Object[]) array.getArray()) {
+                out.add(String.valueOf(value));
+            }
+        }
         return out;
     }
 

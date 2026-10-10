@@ -20,6 +20,7 @@ import in.gov.slate.common.CurrentUser;
 import in.gov.slate.common.Hashes;
 import in.gov.slate.common.NumberingService;
 import in.gov.slate.config.ConfigService;
+import in.gov.slate.config.RuleOutcomePolicy;
 import in.gov.slate.property.OwnerType;
 import in.gov.slate.property.PropertyService;
 import jakarta.validation.constraints.NotBlank;
@@ -695,7 +696,15 @@ public class TransactionService {
         out.put("parties", ctx.parties());
         out.put("witnesses", ctx.witnesses());
         out.put("consents", ctx.consents());
-        out.put("ruleCheckResults", ctx.ruleResults());
+        String stateCode = (String) ctx.transaction().get("state_code");
+        Map<String, RuleOutcomePolicy> rulePolicies = config.ruleOutcomePolicies(stateCode);
+        out.put("ruleCheckResults", ctx.ruleResults().stream().map(result -> {
+            Map<String, Object> row = new LinkedHashMap<>(result);
+            row.put("blocking", rulePolicies.getOrDefault((String) result.get("engine"), RuleOutcomePolicy.DEFAULT)
+                    .blocks((String) result.get("overall_outcome"), (String) result.get("reason_code")));
+            return row;
+        }).toList());
+        out.put("ruleCheckPolicy", config.ruleOutcomePolicyView(stateCode));
         out.put("feeCalculation", ctx.feeCalculation());
         out.put("schedules", schedulesOf(ctx.id()));
         out.put("feeScheduleLines", ctx.feeCalculation() == null ? List.of() : jdbc.queryForList("""

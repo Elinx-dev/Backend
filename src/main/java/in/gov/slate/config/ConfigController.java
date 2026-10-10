@@ -34,6 +34,7 @@ public class ConfigController {
     public record ModuleUpdate(boolean enabled, String mode, String ownerDepartment, Integer slaDays, String notes) {}
     public record FeatureFlagUpdate(boolean enabled) {}
     public record WorkflowUpdate(String status) {}
+    public record RuleOutcomePolicyUpdate(List<String> allowedOutcomes, List<String> blockingReasonCodes) {}
 
     @GetMapping("/admin")
     @PreAuthorize("hasAnyRole('STATE_ADMIN', 'CENTRAL_ADMIN')")
@@ -71,6 +72,26 @@ public class ConfigController {
                 .entity("FEATURE_FLAG", flagCode)
                 .after(Map.of("enabled", request.enabled()))
                 .detail(flagCode + " set to " + request.enabled()));
+    }
+
+    @PutMapping("/admin/rule-engines/{engine}")
+    @PreAuthorize("hasAnyRole('STATE_ADMIN', 'CENTRAL_ADMIN')")
+    public Map<String, Object> updateRuleOutcomePolicy(@PathVariable String engine,
+                                                       @RequestParam(required = false) String stateCode,
+                                                       @RequestBody RuleOutcomePolicyUpdate request) {
+        String targetState = stateScope.resolve(stateCode);
+        Map<String, Object> before = config.ruleOutcomePolicies(targetState)
+                .getOrDefault(engine, RuleOutcomePolicy.DEFAULT).view(engine);
+        RuleOutcomePolicy policy = config.updateRuleOutcomePolicy(targetState, engine,
+                request.allowedOutcomes(), request.blockingReasonCodes());
+        Map<String, Object> after = policy.view(engine);
+        audit.record(AuditEvent.of("CONFIG_RULE_OUTCOME_POLICY_UPDATED").stateCode(targetState)
+                .category(AuditEvent.CATEGORY_CONFIGURATION)
+                .entity("RULE_ENGINE", engine)
+                .before(before)
+                .after(after)
+                .detail(engine + " outcomes allowed to proceed: " + String.join(", ", policy.allowedOutcomes())));
+        return after;
     }
 
     @PutMapping("/admin/workflows/{workflowId}")

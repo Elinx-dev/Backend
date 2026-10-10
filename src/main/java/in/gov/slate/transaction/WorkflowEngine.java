@@ -140,10 +140,11 @@ public class WorkflowEngine {
                 return "Run rule checks before continuing";
             }
             List<String> reasons = validation.blockingRuleResults(ctx).stream()
-                    .map(r -> r.get("engine") + ": " + r.get("reason_code"))
+                    .map(r -> r.get("engine") + " " + r.get("overall_outcome") + " (" + r.get("reason_code") + ")")
                     .toList();
-            return "Pre-registration stopped by rule check (" + String.join(", ", reasons)
-                    + "). The Encumbrance Certificate shows a matter that must be resolved before registration.";
+            return "Stopped at rule checks: " + String.join(", ", reasons)
+                    + ". The state's rule check control does not allow this result to proceed; resolve the finding"
+                    + " and run the rule checks again.";
         }
         return "Guard " + guard + " is not satisfied";
     }

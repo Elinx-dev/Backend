@@ -6,7 +6,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -95,9 +94,8 @@ public class EcRuleEngine implements RuleEngine {
         evaluation.entries().forEach(entry -> persistEntry(certificateId, entry));
         evaluation.mortgages().forEach(mortgage -> persistMortgage(certificateId, mortgage));
 
-        Set<String> blockingReasons = config.blockingRuleReasons((String) ctx.transaction().get("state_code"))
-                .getOrDefault(engine(), Set.of());
-        boolean blocking = blockingReasons.contains(evaluation.reason());
+        boolean blocking = config.ruleResultBlocks((String) ctx.transaction().get("state_code"), engine(),
+                evaluation.outcome(), evaluation.reason());
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("summary", evaluation.summary());
