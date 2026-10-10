@@ -6,6 +6,10 @@ server:
 spring:
   application:
     name: slate-api
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
   datasource:
     url: ${SLATE_DB_URL:jdbc:postgresql://localhost:5432/slate}
     username: ${SLATE_DB_USER:slate_app}

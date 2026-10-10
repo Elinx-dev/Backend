@@ -43,7 +43,11 @@ public class TransactionRepository {
                        mobile, registration_no, representative_role, representative_name,
                        representative_designation, representative_aadhaar_last4, representative_pan,
                        representative_mobile,
-                       property_owner_id, (aadhaar_hash IS NOT NULL) AS aadhaar_captured
+                       property_owner_id, (aadhaar_hash IS NOT NULL) AS aadhaar_captured, deceased,
+                       EXISTS (SELECT 1 FROM core.partition_member m
+                                WHERE m.party_id = transaction_party.id
+                                  AND m.death_cert_document_id IS NOT NULL
+                                  AND m.legal_heir_document_id IS NOT NULL) AS deceased_evidence_complete
                   FROM core.transaction_party WHERE transaction_id = :txnId ORDER BY side, seq
                 """, txnParam);
 

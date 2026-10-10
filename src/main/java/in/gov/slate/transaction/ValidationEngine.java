@@ -67,8 +67,10 @@ public class ValidationEngine {
     }
 
     private void register() {
+        // Living co-owners can partition among themselves, so a Partition may have no SIDE_2 heirs.
         predicates.put("minOnePartyPerSide", ctx ->
-                !ctx.side("SIDE_1").isEmpty() && !ctx.side("SIDE_2").isEmpty());
+                !ctx.side("SIDE_1").isEmpty()
+                        && ("PARTITION".equals(ctx.deedTypeCode()) || !ctx.side("SIDE_2").isEmpty()));
 
         predicates.put("witnessMinimumMet", ctx -> {
             boolean required = Boolean.TRUE.equals(ctx.deedType().get("witness_required"));
@@ -79,7 +81,8 @@ public class ValidationEngine {
         predicates.put("partiesAndWitnessesComplete", ctx ->
                 predicates.get("minOnePartyPerSide").test(ctx)
                         && predicates.get("witnessMinimumMet").test(ctx)
-                        && ctx.parties().stream().allMatch(p -> Boolean.TRUE.equals(p.get("aadhaar_captured"))));
+                        && ctx.parties().stream().filter(p -> !Boolean.TRUE.equals(p.get("deceased")))
+                                .allMatch(p -> Boolean.TRUE.equals(p.get("aadhaar_captured"))));
 
         predicates.put("allPartiesConsentVerified", ctx -> {
             if (ctx.parties().isEmpty()) {
@@ -89,7 +92,9 @@ public class ValidationEngine {
                     .filter(c -> "VERIFIED".equals(c.get("status")))
                     .map(c -> ((Number) c.get("party_id")).longValue())
                     .toList();
+            // Deceased owners in a Partition give no Aadhaar OTP; their living successors do.
             return ctx.parties().stream()
+                    .filter(p -> !Boolean.TRUE.equals(p.get("deceased")))
                     .allMatch(p -> verified.contains(((Number) p.get("id")).longValue()));
         });
 
