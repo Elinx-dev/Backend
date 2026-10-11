@@ -52,7 +52,8 @@ class RevenueServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new RevenueService(jdbc, repository, workflow, connector, audit, new ObjectMapper());
+        service = new RevenueService(jdbc, repository, workflow, connector, audit, new ObjectMapper(),
+                org.mockito.Mockito.mock(in.gov.slate.chain.TokenService.class));
         CurrentUser user = new CurrentUser(7L, "tahsildar.demo", "Demo Tahsildar", "TN", "REVENUE",
                 Set.of("TAHSILDAR"), Set.of("TXN_READ", "REVENUE_APPROVE"), Set.of(), Set.of());
         SecurityContextHolder.getContext().setAuthentication(

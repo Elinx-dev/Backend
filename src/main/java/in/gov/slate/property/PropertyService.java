@@ -55,6 +55,13 @@ public class PropertyService {
         this.locations = locations;
     }
 
+    private in.gov.slate.common.PiiCrypto pii = new in.gov.slate.common.PiiCrypto("", "v1", "");
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void setPiiCrypto(in.gov.slate.common.PiiCrypto pii) {
+        this.pii = pii;
+    }
+
     public record OwnerInput(@NotBlank String ownerName, String aadhaarNumber, String pan,
                              String mobile, String address, String registrationNo,
                              RepresentativeInput representative) {
@@ -239,18 +246,18 @@ public class PropertyService {
                         .addValue("propertyId", id)
                         .addValue("ownerType", req.ownerTypeCode())
                         .addValue("name", o.ownerName().trim())
-                        .addValue("aadhaarNumber", form.ownerAadhaar() ? o.aadhaarNumber() : null)
-                        .addValue("pan", o.pan())
-                        .addValue("mobile", form.ownerMobile() ? o.mobile() : null)
-                        .addValue("address", o.address().trim())
+                        .addValue("aadhaarNumber", pii.protect(form.ownerAadhaar() ? o.aadhaarNumber() : null))
+                        .addValue("pan", pii.protect(o.pan()))
+                        .addValue("mobile", pii.protect(form.ownerMobile() ? o.mobile() : null))
+                        .addValue("address", pii.protect(o.address().trim()))
                         .addValue("registrationNo", form.registrationNo() ? o.registrationNo().trim() : null)
                         .addValue("repRole", form.representativeRole())
                         .addValue("repName", rep == null ? null : rep.name().trim())
                         .addValue("repDesignation", rep == null || !form.representativeDesignation()
                                 ? null : rep.designation().trim())
-                        .addValue("repAadhaar", rep == null ? null : rep.aadhaarNumber())
-                        .addValue("repPan", rep == null ? null : rep.pan())
-                        .addValue("repMobile", rep == null || !form.representativeMobile() ? null : rep.mobile()));
+                        .addValue("repAadhaar", pii.protect(rep == null ? null : rep.aadhaarNumber()))
+                        .addValue("repPan", pii.protect(rep == null ? null : rep.pan()))
+                        .addValue("repMobile", pii.protect(rep == null || !form.representativeMobile() ? null : rep.mobile())));
             }
         }
 
@@ -297,7 +304,9 @@ public class PropertyService {
     public Map<String, Object> get(String propertyRef) {
         CurrentUser user = CurrentUser.require();
         var rows = jdbc.queryForList("""
-                SELECT p.*, t.token_ref, t.state_version AS token_state_version, t.status AS token_status
+                SELECT p.*, t.token_ref, t.state_version AS token_state_version, t.status AS token_status,
+                       (SELECT pp.property_ref FROM core.property pp WHERE pp.id = p.parent_property_id)
+                           AS parent_property_ref
                   FROM core.property p
                   LEFT JOIN chain.token t ON t.id = p.token_id
                  WHERE p.property_ref = :ref AND p.state_code = :stateCode
@@ -308,14 +317,14 @@ public class PropertyService {
         Map<String, Object> property = new LinkedHashMap<>(rows.get(0));
         long id = ((Number) property.get("id")).longValue();
         var idParam = new MapSqlParameterSource("propertyId", id);
-        property.put("registeredOwners", jdbc.queryForList("""
+        property.put("registeredOwners", pii.revealRows(jdbc.queryForList("""
                 SELECT id, owner_type_code, owner_name, aadhaar_number, pan, mobile, address, registration_no,
                        representative_role, representative_name, representative_designation,
                        representative_aadhaar, representative_pan, representative_mobile,
                        share_pct, share_note, source, effective_from
                   FROM core.property_owner WHERE property_id = :propertyId AND effective_to IS NULL
                  ORDER BY id
-                """, idParam));
+                """, idParam)));
         property.put("surveyRecords", jdbc.queryForList("""
                 SELECT seq, ulpin, survey_no, subdivision_no, extent_value, extent_unit
                   FROM core.property_survey
@@ -686,7 +695,8 @@ public class PropertyService {
     private List<Map<String, Object>> propertyRelations(long propertyId) {
         return jdbc.queryForList("""
                 SELECT relation_type, property_ref, property_status, survey_no, subdivision_no,
-                       extent_value, extent_unit, token_ref, token_status, token_state_version,
+                       extent_value, extent_unit, token_ref, token_status, token_approval_status,
+                       token_state_version,
                        parent_token_ref, token_lineage_status, lineage_transaction_ref, parcel_sequence,
                        official_subdivision_no
                   FROM (
@@ -694,6 +704,7 @@ public class PropertyService {
                                parent.status AS property_status, parent.survey_no, parent.subdivision_no,
                                parent.extent_value, parent.extent_unit, parent_token.token_ref,
                                parent_token.status AS token_status,
+                               parent_token.approval_status AS token_approval_status,
                                parent_token.state_version AS token_state_version,
                                parent_token.token_ref AS parent_token_ref,
                                CASE WHEN property_token.parent_token_id = parent_token.id
@@ -716,6 +727,7 @@ public class PropertyService {
                                child.status AS property_status, child.survey_no, child.subdivision_no,
                                child.extent_value, child.extent_unit, child_token.token_ref,
                                child_token.status AS token_status,
+                               child_token.approval_status AS token_approval_status,
                                child_token.state_version AS token_state_version,
                                COALESCE(linked_parent_token.token_ref,
                                         property_parent_token.token_ref) AS parent_token_ref,

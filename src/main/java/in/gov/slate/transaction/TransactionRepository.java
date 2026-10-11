@@ -15,10 +15,13 @@ public class TransactionRepository {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ConfigService config;
+    private final in.gov.slate.common.PiiCrypto pii;
 
-    public TransactionRepository(NamedParameterJdbcTemplate jdbc, ConfigService config) {
+    public TransactionRepository(NamedParameterJdbcTemplate jdbc, ConfigService config,
+                                 in.gov.slate.common.PiiCrypto pii) {
         this.jdbc = jdbc;
         this.config = config;
+        this.pii = pii;
     }
 
     public TransactionContext load(String txnRef, String stateCode) {
@@ -37,7 +40,7 @@ public class TransactionRepository {
         Map<String, Object> property = jdbc.queryForList(
                 "SELECT * FROM core.property WHERE id = :propertyId", propParam).get(0);
 
-        List<Map<String, Object>> parties = jdbc.queryForList("""
+        List<Map<String, Object>> parties = pii.revealRows(jdbc.queryForList("""
                 SELECT id, side, role, seq, party_type, name, aadhaar_last4, karta_name, pan, address,
                        relationship_code, extent_transferred, authority_poa_reference, owner_type_code,
                        mobile, registration_no, representative_role, representative_name,
@@ -49,14 +52,14 @@ public class TransactionRepository {
                                   AND m.death_cert_document_id IS NOT NULL
                                   AND m.legal_heir_document_id IS NOT NULL) AS deceased_evidence_complete
                   FROM core.transaction_party WHERE transaction_id = :txnId ORDER BY side, seq
-                """, txnParam);
+                """, txnParam));
 
-        List<Map<String, Object>> witnesses = jdbc.queryForList("""
+        List<Map<String, Object>> witnesses = pii.revealRows(jdbc.queryForList("""
                 SELECT id, transaction_id, seq, name, address, id_proof_type, id_proof_ref
                   FROM core.witness
                  WHERE transaction_id = :txnId AND is_active = 'Y'
                  ORDER BY seq
-                """, txnParam);
+                """, txnParam));
 
         List<Map<String, Object>> consents = jdbc.queryForList("""
                 SELECT id, party_id, otp_request_reference, status, requested_at, verified_at, attempt_count
@@ -93,13 +96,13 @@ public class TransactionRepository {
                  WHERE s.transaction_id = :txnId ORDER BY rp.seq
                 """, txnParam);
 
-        List<Map<String, Object>> owners = jdbc.queryForList("""
+        List<Map<String, Object>> owners = pii.revealRows(jdbc.queryForList("""
                 SELECT owner_type_code, owner_name, aadhaar_number, pan, mobile, address, registration_no,
                        representative_role, representative_name, representative_designation, representative_aadhaar,
                        representative_pan, representative_mobile, share_pct, source
                   FROM core.property_owner
                  WHERE property_id = :propertyId AND effective_to IS NULL ORDER BY id
-                """, propParam);
+                """, propParam));
 
         Map<String, Object> deedType = config.deedType(stateCode, (String) txn.get("deed_type_code"));
 

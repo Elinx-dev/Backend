@@ -5,9 +5,11 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -70,7 +72,9 @@ public class SurveyService {
 
     public record ParcelInput(@NotNull BigDecimal extentValue, String extentUnit,
                               List<OwnerShare> owners, Map<String, Object> geometryGeoJson,
-                              String officialSubdivisionNo) {
+                              String officialSubdivisionNo, String propertyRef, String surveyNo,
+                              String boundaryNorth, String boundarySouth, String boundaryEast,
+                              String boundaryWest) {
     }
 
     public record OwnerShare(String name, BigDecimal sharePct) {
@@ -170,6 +174,11 @@ public class SurveyService {
         String measuredUnit = req.extentUnit() == null || req.extentUnit().isBlank()
                 ? recordedUnit : AreaUnits.code(req.extentUnit());
         BigDecimal measuredInRecordUnit = AreaUnits.convert(req.measuredExtent(), measuredUnit, recordedUnit);
+        List<Map<String, Object>> children = ctx.subdivisionAtRegistration()
+                ? registration.childProperties(ctx.id()) : List.of();
+        if (!children.isEmpty()) {
+            validateSubdivisionParcels(req, children, measuredUnit);
+        }
         BigDecimal variance = recordedExtent.signum() == 0 ? BigDecimal.ZERO
                 : measuredInRecordUnit.subtract(recordedExtent).abs()
                 .divide(recordedExtent, 6, RoundingMode.HALF_UP).multiply(HUNDRED)
@@ -227,7 +236,9 @@ public class SurveyService {
         }
         saveSegments(submissionId, req.segments());
         saveBoundaryPoints(submissionId, req.boundaryPoints());
-        List<Map<String, Object>> childTokens = saveParcels(ctx, submissionId, req.parcels());
+        List<Map<String, Object>> childTokens = children.isEmpty()
+                ? saveParcels(ctx, submissionId, req.parcels())
+                : updateSubdivisionProperties(submissionId, req.parcels(), measuredUnit, withinTolerance);
 
         audit.record("SURVEY_SUBMITTED", "SURVEY_SUBMISSION", String.valueOf(submissionId), txnRef, ctx.propertyRef(),
                 Map.of("measuredExtent", req.measuredExtent(), "extentUnit", String.valueOf(measuredUnit),
@@ -243,7 +254,13 @@ public class SurveyService {
         out.put("routedTo", withinTolerance ? "VAO_VERIFICATION" : "SURVEY_CORRECTION_REVIEW");
         out.put("childTokens", childTokens);
 
-        if (withinTolerance) {
+        if (withinTolerance && !children.isEmpty()) {
+            TransactionContext reloaded = repository.load(txnRef, user.stateCode());
+            out.put("status", workflow.apply(reloaded, "SUBMIT_SUBDIVISION_SURVEY", null, user));
+            tokens.annotateChildren((String) ctx.transaction().get("state_code"), ctx.id(),
+                    new TokenService.ChainEvent("SUBMIT_SUBDIVISION_SURVEY", "SURVEYOR", user.id(), "APPROVED",
+                            "SURVEY_APPROVED", req.siteNotes()));
+        } else if (withinTolerance) {
             TransactionContext reloaded = repository.load(txnRef, user.stateCode());
             long registrationId = jdbc.queryForObject(
                     "SELECT id FROM core.registration_result WHERE transaction_id = :id",
@@ -451,6 +468,97 @@ public class SurveyService {
                     .addValue("seq", i + 1));
         }
         return minted;
+    }
+
+    /** The Surveyor corrects the survey number, subdivision, extent and boundaries of each new property. */
+    private void validateSubdivisionParcels(SubmissionRequest req, List<Map<String, Object>> children,
+                                            String measuredUnit) {
+        List<ParcelInput> parcels = req.parcels() == null ? List.of() : req.parcels();
+        Set<String> expected = new HashSet<>();
+        children.forEach(child -> expected.add((String) child.get("property_ref")));
+        Set<String> given = new HashSet<>();
+        Set<String> numbers = new HashSet<>();
+        BigDecimal total = BigDecimal.ZERO;
+        for (ParcelInput parcel : parcels) {
+            String ref = blankToNull(parcel.propertyRef());
+            if (ref == null || !expected.contains(ref) || !given.add(ref)) {
+                throw ApiException.badRequest("Survey details must be given once for each new property: "
+                        + String.join(", ", expected));
+            }
+            if (blankToNull(parcel.surveyNo()) == null) {
+                throw ApiException.badRequest("Enter the survey number of " + ref);
+            }
+            String number = parcel.surveyNo().trim() + "/" + (blankToNull(parcel.officialSubdivisionNo()) == null
+                    ? "" : parcel.officialSubdivisionNo().trim());
+            if (!numbers.add(number.toUpperCase())) {
+                throw ApiException.badRequest("Survey number " + number + " is used for more than one property");
+            }
+            if (parcel.extentValue() == null || parcel.extentValue().signum() <= 0) {
+                throw ApiException.badRequest("Enter the extent of " + ref);
+            }
+            if (blankToNull(parcel.boundaryNorth()) == null || blankToNull(parcel.boundarySouth()) == null
+                    || blankToNull(parcel.boundaryEast()) == null || blankToNull(parcel.boundaryWest()) == null) {
+                throw ApiException.badRequest("Enter the north, south, east and west boundaries of " + ref);
+            }
+            String unit = blankToNull(parcel.extentUnit()) == null ? measuredUnit : AreaUnits.code(parcel.extentUnit());
+            total = total.add(AreaUnits.convert(parcel.extentValue(), unit, measuredUnit));
+        }
+        if (!given.equals(expected)) {
+            throw ApiException.badRequest("Survey details must be given once for each new property: "
+                    + String.join(", ", expected));
+        }
+        BigDecimal measured = req.measuredExtent();
+        BigDecimal difference = total.subtract(measured).abs().divide(measured, 6, RoundingMode.HALF_UP).multiply(HUNDRED);
+        if (difference.compareTo(defaultTolerancePct) > 0) {
+            throw ApiException.badRequest("The new properties add up to " + total.stripTrailingZeros().toPlainString()
+                    + " but the measured extent is " + measured.stripTrailingZeros().toPlainString()
+                    + "; they must match within " + defaultTolerancePct.stripTrailingZeros().toPlainString() + "%");
+        }
+    }
+
+    private List<Map<String, Object>> updateSubdivisionProperties(long submissionId, List<ParcelInput> parcels,
+                                                                  String measuredUnit, boolean apply) {
+        int seq = 1;
+        for (ParcelInput parcel : parcels) {
+            String unit = blankToNull(parcel.extentUnit()) == null ? measuredUnit : AreaUnits.code(parcel.extentUnit());
+            MapSqlParameterSource params = new MapSqlParameterSource()
+                    .addValue("ref", parcel.propertyRef().trim())
+                    .addValue("submissionId", submissionId)
+                    .addValue("seq", seq++)
+                    .addValue("surveyNo", parcel.surveyNo().trim())
+                    .addValue("subdivisionNo", blankToNull(parcel.officialSubdivisionNo()))
+                    .addValue("extent", parcel.extentValue())
+                    .addValue("unit", unit)
+                    .addValue("north", parcel.boundaryNorth().trim())
+                    .addValue("south", parcel.boundarySouth().trim())
+                    .addValue("east", parcel.boundaryEast().trim())
+                    .addValue("west", parcel.boundaryWest().trim());
+            jdbc.update("""
+                    INSERT INTO survey.resulting_parcel (submission_id, seq, extent_value, extent_unit,
+                        intended_owner_mapping, child_property_id, child_token_id, official_subdivision_no,
+                        survey_no, boundary_north, boundary_south, boundary_east, boundary_west)
+                    SELECT :submissionId, :seq, :extent, :unit,
+                           (SELECT coalesce(jsonb_agg(jsonb_build_object('name', o.owner_name)), '[]'::jsonb)
+                              FROM core.property_owner o WHERE o.property_id = p.id AND o.effective_to IS NULL),
+                           p.id, p.token_id, :subdivisionNo, :surveyNo, :north, :south, :east, :west
+                      FROM core.property p WHERE p.property_ref = :ref
+                    """, params);
+            if (apply) {
+                jdbc.update("""
+                        UPDATE core.property SET survey_no = :surveyNo, subdivision_no = :subdivisionNo,
+                               extent_value = :extent, extent_unit = :unit, boundary_north = :north,
+                               boundary_south = :south, boundary_east = :east, boundary_west = :west
+                         WHERE property_ref = :ref
+                        """, params);
+                jdbc.update("""
+                        UPDATE core.property_survey s SET survey_no = :surveyNo, subdivision_no = :subdivisionNo,
+                               extent_value = :extent, extent_unit = :unit
+                          FROM core.property p
+                         WHERE s.property_id = p.id AND p.property_ref = :ref AND s.seq = 1
+                        """, params);
+            }
+        }
+        return List.of();
     }
 
     public List<Map<String, Object>> submissions(String txnRef) {

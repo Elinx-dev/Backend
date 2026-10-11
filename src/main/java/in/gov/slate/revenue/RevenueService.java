@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import in.gov.slate.chain.TokenService;
 import in.gov.slate.common.ApiException;
 import in.gov.slate.tahsildar.ApprovalChecklist;
 import in.gov.slate.common.AuditEvent;
@@ -41,9 +42,11 @@ public class RevenueService {
     private final RevenueConnector connector;
     private final AuditService audit;
     private final ObjectMapper mapper;
+    private final TokenService tokens;
 
     public RevenueService(NamedParameterJdbcTemplate jdbc, TransactionRepository repository, WorkflowEngine workflow,
-                          RevenueConnector connector, AuditService audit, ObjectMapper mapper) {
+                          RevenueConnector connector, AuditService audit, ObjectMapper mapper, TokenService tokens) {
+        this.tokens = tokens;
         this.jdbc = jdbc;
         this.repository = repository;
         this.workflow = workflow;
@@ -127,7 +130,10 @@ public class RevenueService {
                 .addValue("remarks", req.remarks()));
 
         TransactionContext ctx = repository.load((String) mutation.get("txn_ref"), user.stateCode());
-        String status = workflow.apply(ctx, "VAO_FORWARD", req.remarks(), user);
+        String status = workflow.apply(ctx, ctx.subdivisionAtRegistration() ? "VAO_FORWARD_TO_SURVEY" : "VAO_FORWARD",
+                req.remarks(), user);
+        recordChildBlocks(ctx, user, "VAO_FORWARD_TO_SURVEY", "VAO", AuditEvent.DECISION_APPROVED, "VAO_APPROVED",
+                req.remarks());
         audit.record("MUTATION_FORWARDED", "MUTATION", String.valueOf(mutationId), ctx.txnRef(), ctx.propertyRef(),
                 Map.of("status", status), null);
         return detail(mutationId);
@@ -179,6 +185,7 @@ public class RevenueService {
 
         TransactionContext ctx = repository.load((String) mutation.get("txn_ref"), user.stateCode());
         workflow.apply(ctx, "RAISE_OBJECTION", req.objectionReason(), user);
+        recordChildBlocks(ctx, user, "RAISE_OBJECTION", "VAO", null, "OBJECTION_PENDING", req.objectionReason());
         audit.record("OBJECTION_RAISED", "MUTATION", String.valueOf(mutationId), ctx.txnRef(), ctx.propertyRef(),
                 Map.of("objector", String.valueOf(req.objectorName())), null);
         return detail(mutationId);
@@ -201,6 +208,8 @@ public class RevenueService {
 
         TransactionContext ctx = repository.load((String) mutation.get("txn_ref"), user.stateCode());
         workflow.apply(ctx, "DISPOSE_OBJECTION", req.remarks() != null ? req.remarks() : req.disposalDecision(), user);
+        recordChildBlocks(ctx, user, "DISPOSE_OBJECTION", "VAO", disposalDecision(req.disposalDecision()),
+                "VAO_PENDING", req.remarks() != null ? req.remarks() : req.disposalDecision());
         audit.record(AuditEvent.of("OBJECTION_DISPOSED")
                 .category(AuditEvent.CATEGORY_APPROVAL)
                 .entity("MUTATION", String.valueOf(mutationId))
@@ -260,6 +269,8 @@ public class RevenueService {
                 .addValue("sourceRef", pushed.mutationNumber()));
 
         String status = workflow.apply(ctx, "TAHSILDAR_APPROVE", req.remarks(), user);
+        recordChildBlocks(ctx, user, "TAHSILDAR_APPROVE", "TAHSILDAR", AuditEvent.DECISION_APPROVED,
+                "TAHSILDAR_APPROVED", req.remarks());
         audit.record(AuditEvent.of("MUTATION_APPROVED")
                 .category(AuditEvent.CATEGORY_APPROVAL)
                 .entity("MUTATION", String.valueOf(mutationId))
@@ -270,6 +281,15 @@ public class RevenueService {
                 .after(Map.of("status", status, "revenueRecordRef", pushed.revenueRecordRef()))
                 .detail(req.remarks()));
         return detail(mutationId);
+    }
+
+    /** Subdivision at Register: the officer action becomes a new block on each child token. */
+    private void recordChildBlocks(TransactionContext ctx, CurrentUser user, String action, String role,
+                                   String decision, String approvalStatus, String remarks) {
+        if (ctx.subdivisionAtRegistration()) {
+            tokens.annotateChildren((String) ctx.transaction().get("state_code"), ctx.id(),
+                    new TokenService.ChainEvent(action, role, user.id(), decision, approvalStatus, remarks));
+        }
     }
 
     /** Maps the free-text objection disposal onto the audited approval decision. */

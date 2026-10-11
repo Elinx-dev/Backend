@@ -143,6 +143,8 @@ public class SurveyorService {
         Map<String, Object> out = new LinkedHashMap<>(row);
         out.put("property", ctx.property());
         out.put("parties", ctx.parties());
+        out.put("childProperties", jdbc.queryForList(in.gov.slate.registration.RegistrationService.CHILD_PROPERTIES_SQL,
+                new MapSqlParameterSource("txnId", ctx.id())));
         out.put("visits", jdbc.queryForList("""
                 SELECT v.*, %s AS agreed_date, %s AS agreed_time, pu.full_name AS proposed_by_name
                   FROM survey.site_visit v
@@ -169,6 +171,16 @@ public class SurveyorService {
             out.put("boundary_points", jdbc.queryForList("""
                     SELECT seq, point_label, marker_status, latitude, longitude FROM survey.boundary_point
                      WHERE submission_id = :id ORDER BY seq
+                    """, subParam));
+            out.put("parcels", jdbc.queryForList("""
+                    SELECT rp.seq, rp.survey_no, rp.official_subdivision_no, rp.extent_value, rp.extent_unit,
+                           rp.boundary_north, rp.boundary_south, rp.boundary_east, rp.boundary_west,
+                           rp.intended_owner_mapping::text AS owners, cp.property_ref AS child_property_ref,
+                           cp.status AS child_status, ct.token_ref AS child_token_ref
+                      FROM survey.resulting_parcel rp
+                      LEFT JOIN core.property cp ON cp.id = rp.child_property_id
+                      LEFT JOIN chain.token ct ON ct.id = rp.child_token_id
+                     WHERE rp.submission_id = :id ORDER BY rp.seq
                     """, subParam));
         }
         if (row.get("mutation_id") != null) {

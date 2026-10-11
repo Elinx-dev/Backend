@@ -68,4 +68,50 @@ public class PublicController {
                   FROM rpt.token_history_view WHERE token_ref = :tokenRef ORDER BY state_version
                 """, new MapSqlParameterSource("tokenRef", tokenRef));
     }
+
+    private in.gov.slate.chain.ChainService chain;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void setChainService(in.gov.slate.chain.ChainService chain) {
+        this.chain = chain;
+    }
+
+    /** Certificate QR target: checks the registered deed and the property token against the chain. No personal data. */
+    @GetMapping("/verify")
+    public Map<String, Object> verifyCertificate(@RequestParam String documentNo) {
+        if (!documentNo.matches("[A-Za-z0-9/_-]{1,64}")) {
+            throw ApiException.badRequest("Invalid document number");
+        }
+        var rows = jdbc.queryForList("""
+                SELECT r.registered_document_no, r.registration_date, r.registering_sro,
+                       '0x' || encode(r.deed_sha256, 'hex') AS deed_sha256, tx.txn_ref, tx.state_code,
+                       p.property_ref, p.status AS property_status, t.token_ref, t.status AS token_status,
+                       (SELECT '0x' || encode(h.state_hash, 'hex') FROM chain.token_state_history h
+                         WHERE h.token_id = t.id ORDER BY h.state_version DESC LIMIT 1) AS latest_state_hash
+                  FROM core.registration_result r
+                  JOIN core.transaction tx ON tx.id = r.transaction_id
+                  JOIN core.property p ON p.id = tx.property_id
+                  LEFT JOIN chain.token t ON t.id = p.token_id
+                 WHERE r.registered_document_no = :doc
+                """, new MapSqlParameterSource("doc", documentNo));
+        if (rows.isEmpty()) {
+            throw ApiException.notFound("Registered document " + documentNo);
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>(rows.get(0));
+        String stateCode = String.valueOf(out.remove("state_code")).trim();
+        boolean connected = chain != null && chain.connected(stateCode);
+        out.put("chainConnected", connected);
+        String onChainDeed = connected ? chain.deedOf(stateCode, documentNo) : null;
+        out.put("deedHashOnChain", onChainDeed);
+        String deedStatus = onChainDeed == null ? "NOT_CONFIGURED" : onChainDeed.isEmpty() ? "NOT_ANCHORED"
+                : onChainDeed.equalsIgnoreCase((String) out.get("deed_sha256")) ? "VERIFIED" : "MISMATCH";
+        out.put("deedStatus", deedStatus);
+        Object tokenRef = out.get("token_ref");
+        Object stateHash = out.get("latest_state_hash");
+        Boolean tokenOnChain = connected && tokenRef != null && stateHash != null
+                ? chain.hasState(stateCode, (String) tokenRef, (String) stateHash) : null;
+        out.put("tokenStatusOnChain", tokenOnChain == null ? "NOT_CONFIGURED" : tokenOnChain ? "VERIFIED" : "NOT_ANCHORED");
+        return out;
+    }
+
 }
