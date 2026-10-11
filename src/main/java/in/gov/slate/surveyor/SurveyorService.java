@@ -170,6 +170,16 @@ public class SurveyorService {
                     SELECT seq, point_label, marker_status, latitude, longitude FROM survey.boundary_point
                      WHERE submission_id = :id ORDER BY seq
                     """, subParam));
+            out.put("parcels", jdbc.queryForList("""
+                    SELECT rp.seq, rp.survey_no, rp.official_subdivision_no, rp.extent_value, rp.extent_unit,
+                           rp.boundary_north, rp.boundary_south, rp.boundary_east, rp.boundary_west,
+                           rp.intended_owner_mapping::text AS owners, cp.property_ref AS child_property_ref,
+                           cp.status AS child_status, ct.token_ref AS child_token_ref
+                      FROM survey.resulting_parcel rp
+                      LEFT JOIN core.property cp ON cp.id = rp.child_property_id
+                      LEFT JOIN chain.token ct ON ct.id = rp.child_token_id
+                     WHERE rp.submission_id = :id ORDER BY rp.seq
+                    """, subParam));
         }
         if (row.get("mutation_id") != null) {
             var mutationParam = new MapSqlParameterSource("id", row.get("mutation_id"));

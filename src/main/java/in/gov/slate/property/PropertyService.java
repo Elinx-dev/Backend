@@ -297,7 +297,9 @@ public class PropertyService {
     public Map<String, Object> get(String propertyRef) {
         CurrentUser user = CurrentUser.require();
         var rows = jdbc.queryForList("""
-                SELECT p.*, t.token_ref, t.state_version AS token_state_version, t.status AS token_status
+                SELECT p.*, t.token_ref, t.state_version AS token_state_version, t.status AS token_status,
+                       (SELECT pp.property_ref FROM core.property pp WHERE pp.id = p.parent_property_id)
+                           AS parent_property_ref
                   FROM core.property p
                   LEFT JOIN chain.token t ON t.id = p.token_id
                  WHERE p.property_ref = :ref AND p.state_code = :stateCode

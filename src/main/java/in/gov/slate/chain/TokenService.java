@@ -188,15 +188,15 @@ public class TokenService {
                     .addValue("version", version)
                     .addValue("ownerHash", emptyOwnerHash)
                     .addValue("prevState", prevState));
-            jdbc.update("UPDATE core.property SET status = 'SUPERSEDED' WHERE id = :propertyId",
-                    new MapSqlParameterSource("propertyId", parentPropertyId));
-            jdbc.update("""
-                    UPDATE core.property_owner SET effective_to = current_date
-                     WHERE property_id = :propertyId AND effective_to IS NULL
-                    """, new MapSqlParameterSource("propertyId", parentPropertyId));
             recordHistory(parentTokenId, version, "SUPERSEDE", transactionId,
                     emptyOwnerHash, List.of(), null, prevState, state);
         }
+        jdbc.update("UPDATE core.property SET status = 'INACTIVE' WHERE id = :propertyId",
+                new MapSqlParameterSource("propertyId", parentPropertyId));
+        jdbc.update("""
+                UPDATE core.property_owner SET effective_to = current_date
+                 WHERE property_id = :propertyId AND effective_to IS NULL
+                """, new MapSqlParameterSource("propertyId", parentPropertyId));
         return minted;
     }
 
