@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import in.gov.slate.common.ApiException;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.revenue.RevenueService;
+import in.gov.slate.survey.RecordDetailSupport;
 import in.gov.slate.transaction.TransactionContext;
 import in.gov.slate.transaction.TransactionRepository;
 
@@ -186,6 +187,7 @@ public class TahsildarService {
                  ORDER BY occurred_at
                 """, new MapSqlParameterSource().addValue("stateCode", user.stateCode())
                 .addValue("txnRef", txnRef)));
+        RecordDetailSupport.addRecordDetails(jdbc, ctx, out);
         return out;
     }
 
