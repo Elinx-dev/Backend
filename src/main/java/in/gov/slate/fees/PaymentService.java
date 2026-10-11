@@ -16,17 +16,21 @@ import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.transaction.TransactionContext;
 import in.gov.slate.transaction.TransactionRepository;
+import in.gov.slate.transaction.WorkflowEngine;
 
 @Service
 public class PaymentService {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final TransactionRepository repository;
+    private final WorkflowEngine workflow;
     private final AuditService audit;
 
-    public PaymentService(NamedParameterJdbcTemplate jdbc, TransactionRepository repository, AuditService audit) {
+    public PaymentService(NamedParameterJdbcTemplate jdbc, TransactionRepository repository, WorkflowEngine workflow,
+                          AuditService audit) {
         this.jdbc = jdbc;
         this.repository = repository;
+        this.workflow = workflow;
         this.audit = audit;
     }
 
@@ -38,11 +42,24 @@ public class PaymentService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("PAYMENT_RECORD");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
+        workflow.requireStatus(ctx, "FEE_PAYMENT_PENDING", "Payment recording", user);
         if (ctx.totalPayable() == null) {
             throw ApiException.conflict("Fees have not been calculated for " + txnRef);
         }
         if (input.amount() == null || input.amount().signum() <= 0) {
             throw ApiException.badRequest("Payment amount must be positive");
+        }
+        if (input.paidAt() != null && input.paidAt().isAfter(OffsetDateTime.now())) {
+            throw ApiException.badRequest("Payment date cannot be in the future");
+        }
+        Boolean stale = jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM core.transaction_schedule
+                                WHERE transaction_id = :txnId AND created_at > :calculatedAt)
+                """, new MapSqlParameterSource()
+                .addValue("txnId", ctx.id())
+                .addValue("calculatedAt", ctx.feeCalculation().get("calculated_at")), Boolean.class);
+        if (Boolean.TRUE.equals(stale)) {
+            throw ApiException.conflict("Schedules changed after the fee was calculated; calculate the fee again");
         }
 
         jdbc.update("""

@@ -39,7 +39,7 @@ public class PropertyController {
         return created;
     }
 
-    @GetMapping("/{propertyRef}")
+    @GetMapping({"/{propertyRef}", "/ref/{propertyRef}"})
     public Map<String, Object> get(@PathVariable String propertyRef) {
         return properties.get(propertyRef);
     }

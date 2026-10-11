@@ -21,8 +21,11 @@ public class TokenController {
     private final NamedParameterJdbcTemplate jdbc;
     private final TokenService tokens;
     private final VerificationService verification;
+    private final in.gov.slate.common.JurisdictionGuard guard;
 
-    public TokenController(NamedParameterJdbcTemplate jdbc, TokenService tokens, VerificationService verification) {
+    public TokenController(NamedParameterJdbcTemplate jdbc, TokenService tokens, VerificationService verification,
+                           in.gov.slate.common.JurisdictionGuard guard) {
+        this.guard = guard;
         this.jdbc = jdbc;
         this.tokens = tokens;
         this.verification = verification;
@@ -30,10 +33,12 @@ public class TokenController {
 
     @GetMapping("/{tokenRef}")
     public Map<String, Object> token(@PathVariable String tokenRef) {
-        CurrentUser.require().requirePermission("TOKEN_READ");
+        CurrentUser user = CurrentUser.require();
+        user.requirePermission("TOKEN_READ");
         var rows = jdbc.queryForList("""
-                SELECT t.id, t.token_ref, t.state_version, t.status, t.minted_at, t.superseded_at,
-                       p.property_ref, parent.token_ref AS parent_token_ref,
+                SELECT t.id, t.token_ref, t.state_version, t.status, t.approval_status, t.minted_at, t.superseded_at,
+                       p.property_ref, parent.token_ref AS parent_token_ref, p.state_code, p.district_code,
+                       p.taluk_code, p.village_code, p.sro_code,
                        encode(t.owner_set_hash,'hex') AS owner_set_hash,
                        encode(t.property_ref_hash,'hex') AS property_ref_hash
                   FROM chain.token t
@@ -44,7 +49,15 @@ public class TokenController {
         if (rows.isEmpty()) {
             throw ApiException.notFound("Token " + tokenRef);
         }
-        return rows.get(0);
+        guard.require(user, rows.get(0), "Token " + tokenRef);
+        Map<String, Object> out = new java.util.LinkedHashMap<>(rows.get(0));
+        out.put("children", jdbc.queryForList("""
+                SELECT c.token_ref, c.status, c.approval_status, c.state_version, p.property_ref,
+                       p.status AS property_status
+                  FROM chain.token c JOIN core.property p ON p.id = c.property_id
+                 WHERE c.parent_token_id = :id ORDER BY c.id
+                """, new MapSqlParameterSource("id", out.get("id"))));
+        return out;
     }
 
     @GetMapping("/{tokenRef}/history")

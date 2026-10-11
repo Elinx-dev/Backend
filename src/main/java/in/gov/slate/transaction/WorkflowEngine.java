@@ -9,6 +9,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import in.gov.slate.common.ApiException;
+import in.gov.slate.common.AuditEvent;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.config.ConfigService;
@@ -45,23 +46,21 @@ public class WorkflowEngine {
                 .toList();
     }
 
-    public String apply(TransactionContext ctx, String actionCode, String reason, CurrentUser user) {
-        Map<String, Object> transition = transitionsFrom(ctx).stream()
-                .filter(t -> actionCode.equals(t.get("action_code")))
-                .findFirst()
-                .orElseThrow(() -> ApiException.conflict(
-                        "Action " + actionCode + " is not available from status " + ctx.status()));
-
-        if (!roleAllowed(transition, user)) {
-            throw ApiException.forbidden("Your role may not perform " + actionCode);
+    public void requireStatus(TransactionContext ctx, String requiredStatus, String operation, CurrentUser user) {
+        if (!requiredStatus.equals(ctx.status())) {
+            throw unavailableFromStatus(ctx, operation, List.of(requiredStatus), user);
         }
+    }
+
+    public void requireAvailable(TransactionContext ctx, String actionCode, CurrentUser user) {
+        validateTransitionAccess(ctx, transitionFor(ctx, actionCode, user), actionCode, user);
+    }
+
+    public String apply(TransactionContext ctx, String actionCode, String reason, CurrentUser user) {
+        Map<String, Object> transition = transitionFor(ctx, actionCode, user);
+        validateTransitionAccess(ctx, transition, actionCode, user);
         if (Boolean.TRUE.equals(transition.get("requires_reason")) && (reason == null || reason.isBlank())) {
             throw ApiException.badRequest("A reason is required for " + actionCode);
-        }
-        if (!guardPasses(transition, ctx)) {
-            // Surface the specific validation failures rather than a bare guard name.
-            validation.evaluate(ctx, "TRANSACTION", true);
-            throw ApiException.conflict("Guard " + transition.get("guard_expr") + " is not satisfied");
         }
 
         String toStatus = (String) transition.get("to_status");
@@ -80,10 +79,107 @@ public class WorkflowEngine {
                  WHERE id = :id
                 """, params);
 
-        audit.record("TRANSITION_" + actionCode, "TRANSACTION", String.valueOf(ctx.id()), ctx.txnRef(),
-                ctx.propertyRef(), Map.of("status", ctx.status()),
-                Map.of("status", toStatus, "stage", stage), "SUCCESS", reason);
+        audit.record(AuditEvent.of("TRANSITION_" + actionCode)
+                .entity("TRANSACTION", String.valueOf(ctx.id()))
+                .transactionRef(ctx.txnRef())
+                .propertyRef(ctx.propertyRef())
+                .statusChange(ctx.status(), toStatus)
+                .stageCode(stage)
+                .before(Map.of("status", ctx.status()))
+                .after(Map.of("status", toStatus, "stage", stage))
+                .detail(reason));
         return toStatus;
+    }
+
+    private Map<String, Object> transitionFor(TransactionContext ctx, String actionCode, CurrentUser user) {
+        List<Map<String, Object>> transitions = transitionsFrom(ctx);
+        return transitions.stream()
+                .filter(t -> actionCode.equals(t.get("action_code")))
+                .findFirst()
+                .orElseThrow(() -> unavailableFromStatus(ctx, "Action " + actionCode,
+                        requiredStatuses(ctx, actionCode), user));
+    }
+
+    private void validateTransitionAccess(TransactionContext ctx, Map<String, Object> transition, String actionCode,
+                                          CurrentUser user) {
+        if (!roleAllowed(transition, user)) {
+            throw ApiException.forbidden("Your role may not perform " + actionCode);
+        }
+        if (!guardPasses(transition, ctx)) {
+            throw ApiException.conflict(guardFailureMessage(transition, ctx));
+        }
+    }
+
+    private String guardFailureMessage(Map<String, Object> transition, TransactionContext ctx) {
+        String guard = (String) transition.get("guard_expr");
+        if ("partiesAndWitnessesComplete".equals(guard)) {
+            List<String> missing = new java.util.ArrayList<>();
+            if (ctx.side("SIDE_1").isEmpty()) {
+                missing.add("at least one party on Side 1");
+            }
+            if (ctx.side("SIDE_2").isEmpty()) {
+                missing.add("at least one party on Side 2");
+            }
+            boolean witnessRequired = Boolean.TRUE.equals(ctx.deedType().get("witness_required"));
+            int minimumWitnesses = ((Number) ctx.deedType().get("min_witness_count")).intValue();
+            if (witnessRequired && ctx.witnesses().size() < minimumWitnesses) {
+                missing.add(minimumWitnesses + " witness(es)");
+            }
+            List<String> partiesWithoutAadhaar = ctx.parties().stream()
+                    .filter(party -> !Boolean.TRUE.equals(party.get("aadhaar_captured")))
+                    .map(party -> String.valueOf(party.get("name")))
+                    .toList();
+            if (!partiesWithoutAadhaar.isEmpty()) {
+                missing.add("no Aadhaar on record for " + String.join(", ", partiesWithoutAadhaar)
+                        + " (enter it on the Aadhaar consent tab)");
+            }
+            return "Cannot request consent: " + String.join("; ", missing);
+        }
+        if ("ruleChecksPassed".equals(guard)) {
+            if (ctx.ruleResults().isEmpty()) {
+                return "Run rule checks before continuing";
+            }
+            List<String> reasons = validation.blockingRuleResults(ctx).stream()
+                    .map(r -> r.get("engine") + " " + r.get("overall_outcome") + " (" + r.get("reason_code") + ")")
+                    .toList();
+            return "Stopped at rule checks: " + String.join(", ", reasons)
+                    + ". The state's rule check control does not allow this result to proceed; resolve the finding"
+                    + " and run the rule checks again.";
+        }
+        return "Guard " + guard + " is not satisfied";
+    }
+
+    private List<String> requiredStatuses(TransactionContext ctx, String actionCode) {
+        return jdbc.queryForList("""
+                SELECT DISTINCT from_status
+                  FROM cfg.workflow_transition
+                 WHERE workflow_id = :workflowId AND action_code = :actionCode
+                 ORDER BY from_status
+                """, new MapSqlParameterSource()
+                .addValue("workflowId", ctx.transaction().get("workflow_id"))
+                .addValue("actionCode", actionCode), String.class);
+    }
+
+    private ApiException unavailableFromStatus(TransactionContext ctx, String operation, List<String> requiredStatuses,
+                                               CurrentUser user) {
+        StringBuilder message = new StringBuilder(operation)
+                .append(" cannot be performed from status ")
+                .append(ctx.status());
+        if (!requiredStatuses.isEmpty()) {
+            message.append(". Required status");
+            message.append(requiredStatuses.size() == 1 ? ": " : "es: ");
+            message.append(String.join(", ", requiredStatuses));
+        }
+        List<String> available = availableActions(ctx, user).stream()
+                .map(action -> action.get("actionCode").toString())
+                .toList();
+        if (!available.isEmpty()) {
+            message.append(". Available actions from ")
+                    .append(ctx.status())
+                    .append(": ")
+                    .append(String.join(", ", available));
+        }
+        return ApiException.conflict(message.toString());
     }
 
     private List<Map<String, Object>> transitionsFrom(TransactionContext ctx) {

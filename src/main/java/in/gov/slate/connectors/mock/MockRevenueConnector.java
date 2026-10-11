@@ -31,7 +31,7 @@ public class MockRevenueConnector implements RevenueConnector {
             // An unseeded parcel is a genuine "no record", not an outage.
             return new RevenueOwnershipResponse("NOT_FOUND", null, request.village(), request.surveyNo(),
                     request.subdivisionNo(), request.landType(), null, null, null, java.util.List.of(), null,
-                    "MOCK-REVENUE-API/NO-FIXTURE");
+                    "MOCK-REVENUE-API/NO-FIXTURE", request.district(), request.taluk(), null);
         }
         return response;
     }

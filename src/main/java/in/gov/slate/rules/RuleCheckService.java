@@ -17,31 +17,37 @@ import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import in.gov.slate.common.AuditService;
+import in.gov.slate.config.ConfigService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.common.Hashes;
 import in.gov.slate.transaction.TransactionContext;
 import in.gov.slate.transaction.TransactionRepository;
+import in.gov.slate.transaction.WorkflowEngine;
 
 /**
  * Runs the configured rule engines for a transaction and stores their results.
- * Results are advisory during the pilot: they are recorded and displayed, and
- * they never approve, block or alter a transaction.
+ * Results are advisory unless the engine's outcome is configured as blocking
+ * (cfg.rule_engine_config.blocking_reason_codes), which stops pre-registration.
  */
 @Service
 public class RuleCheckService {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final TransactionRepository repository;
+    private final WorkflowEngine workflow;
     private final List<RuleEngine> engines;
     private final AuditService audit;
     private final ObjectMapper mapper;
     private final String connectorMode;
+    private final ConfigService config;
 
     public RuleCheckService(NamedParameterJdbcTemplate jdbc, TransactionRepository repository,
-                            List<RuleEngine> engines, AuditService audit, ObjectMapper mapper,
-                            @Value("${slate.connectors.mode}") String connectorMode) {
+                            WorkflowEngine workflow, List<RuleEngine> engines, AuditService audit, ObjectMapper mapper,
+                            ConfigService config, @Value("${slate.connectors.mode}") String connectorMode) {
+        this.config = config;
         this.jdbc = jdbc;
         this.repository = repository;
+        this.workflow = workflow;
         this.engines = engines;
         this.audit = audit;
         this.mapper = mapper;
@@ -54,7 +60,8 @@ public class RuleCheckService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("RULE_CHECK_RUN");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
-        String effectiveMode = mode == null ? "PILOT_CURRENT_RECONCILIATION" : mode;
+        workflow.requireStatus(ctx, "RULE_CHECK_PENDING", "Rule checks", user);
+        String effectiveMode = mode == null ? "PRE_REGISTRATION_CLEARANCE" : mode;
         LocalDate assessedOn = assessmentDate == null ? LocalDate.now() : assessmentDate;
 
         List<Map<String, Object>> out = new ArrayList<>();
@@ -63,15 +70,18 @@ public class RuleCheckService {
                     && !requestedEngines.contains(engine.engine())) {
                 continue;
             }
-            long requestId = createRequest(ctx, engine.engine(), effectiveMode, assessedOn, user.id());
+            long requestId = createRequest(ctx, engine.engine(), engine.requestPayload(ctx, assessedOn),
+                    effectiveMode, assessedOn, user.id());
             RuleEngine.Outcome outcome = engine.run(ctx, requestId, assessedOn, effectiveMode);
-            storeResult(requestId, engine.engine(), outcome);
+            boolean advisory = !config.ruleResultBlocks((String) ctx.transaction().get("state_code"), engine.engine(),
+                    outcome.overallOutcome(), outcome.reasonCode());
+            storeResult(requestId, engine.engine(), outcome, advisory);
 
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("engine", engine.engine());
             row.put("overallOutcome", outcome.overallOutcome());
             row.put("reasonCode", outcome.reasonCode());
-            row.put("advisory", true);
+            row.put("advisory", advisory);
             row.put("payload", outcome.payload());
             out.add(row);
 
@@ -86,24 +96,28 @@ public class RuleCheckService {
         CurrentUser user = CurrentUser.require();
         long txnId = repository.idOf(txnRef, user.stateCode());
         return jdbc.queryForList("""
-                SELECT q.engine, q.mode, q.assessment_date, q.connector_mode, q.requested_at,
-                       r.overall_outcome, r.reason_code, r.result_payload, r.advisory, r.checked_at
-                  FROM rules.rule_check_request q
-                  JOIN rules.rule_check_result r ON r.request_id = q.id
-                 WHERE q.transaction_id = :txnId
-                 ORDER BY r.checked_at DESC
+                SELECT engine, mode, assessment_date, connector_mode, requested_at,
+                       overall_outcome, reason_code, result_payload, advisory, checked_at
+                  FROM (
+                    SELECT q.engine, q.mode, q.assessment_date, q.connector_mode, q.requested_at,
+                           r.overall_outcome, r.reason_code, r.result_payload, r.advisory, r.checked_at,
+                           row_number() OVER (
+                               PARTITION BY q.engine
+                               ORDER BY r.checked_at DESC, q.requested_at DESC, r.id DESC
+                           ) AS result_rank
+                      FROM rules.rule_check_request q
+                      JOIN rules.rule_check_result r ON r.request_id = q.id
+                     WHERE q.transaction_id = :txnId
+                  ) latest
+                 WHERE result_rank = 1
+                 ORDER BY engine
                 """, new MapSqlParameterSource("txnId", txnId));
     }
 
-    private long createRequest(TransactionContext ctx, String engine, String mode, LocalDate assessmentDate,
-                               long userId) {
+
+    private long createRequest(TransactionContext ctx, String engine, Map<String, Object> payload, String mode,
+                               LocalDate assessmentDate, long userId) {
         var keyHolder = new GeneratedKeyHolder();
-        Map<String, Object> payload = Map.of(
-                "propertyRef", ctx.propertyRef(),
-                "village", String.valueOf(ctx.property().get("village_code")),
-                "surveyNo", String.valueOf(ctx.property().get("survey_no")),
-                "subdivisionNo", String.valueOf(ctx.property().get("subdivision_no")),
-                "engine", engine);
         jdbc.update("""
                 INSERT INTO rules.rule_check_request (state_code, transaction_id, property_id, engine, mode,
                     assessment_date, request_payload, idempotency_key, requested_by, connector_mode)
@@ -123,19 +137,20 @@ public class RuleCheckService {
         return keyHolder.getKey().longValue();
     }
 
-    private void storeResult(long requestId, String engine, RuleEngine.Outcome outcome) {
+    private void storeResult(long requestId, String engine, RuleEngine.Outcome outcome, boolean advisory) {
         String payload = json(outcome.payload());
         jdbc.update("""
                 INSERT INTO rules.rule_check_result (request_id, engine, overall_outcome, reason_code,
                     result_payload, result_hash, advisory)
-                VALUES (:requestId, :engine, :outcome, :reason, cast(:payload AS jsonb), :hash, TRUE)
+                VALUES (:requestId, :engine, :outcome, :reason, cast(:payload AS jsonb), :hash, :advisory)
                 """, new MapSqlParameterSource()
                 .addValue("requestId", requestId)
                 .addValue("engine", engine)
                 .addValue("outcome", outcome.overallOutcome())
                 .addValue("reason", outcome.reasonCode())
                 .addValue("payload", payload)
-                .addValue("hash", Hashes.sha256(payload)));
+                .addValue("hash", Hashes.sha256(payload))
+                .addValue("advisory", advisory));
     }
 
     private String json(Object value) {

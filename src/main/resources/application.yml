@@ -1,15 +1,19 @@
 server:
-  port: ${SLATE_API_PORT:8080}
+  port: ${SLATE_API_PORT:8081}
   error:
     include-message: always
 
 spring:
   application:
     name: slate-api
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
   datasource:
     url: ${SLATE_DB_URL:jdbc:postgresql://localhost:5432/slate}
-    username: ${SLATE_DB_USER:slate}
-    password: ${SLATE_DB_PASSWORD:slate}
+    username: ${SLATE_DB_USER:slate_app}
+    password: ${SLATE_DB_PASSWORD:slate_app}
     hikari:
       maximum-pool-size: 15
   flyway:
@@ -21,24 +25,54 @@ spring:
     default-property-inclusion: non_null
     serialization:
       write-dates-as-timestamps: false
+  mail:
+    host: ${SLATE_SMTP_HOST:localhost}
+    port: ${SLATE_SMTP_PORT:1025}
+    username: ${SLATE_SMTP_USERNAME:}
+    password: ${SLATE_SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${SLATE_SMTP_AUTH:false}
+          starttls:
+            enable: ${SLATE_SMTP_STARTTLS:false}
 
 slate:
   jwt:
     secret: ${SLATE_JWT_SECRET:local-demo-only-secret-key-please-override-in-any-real-environment}
-    access-token-minutes: ${SLATE_JWT_MINUTES:15}
+    access-token-minutes: ${SLATE_JWT_MINUTES:10}
+  session:
+    idle-timeout-minutes: ${SLATE_IDLE_TIMEOUT_MINUTES:10}
   otp:
     # Officer login OTP and Aadhaar party-consent OTP are two different things.
     # In the local demo both are served by deterministic mock connectors.
     officer-demo-otp: ${SLATE_OFFICER_OTP:123456}
-    aadhaar-demo-otp: ${SLATE_AADHAAR_OTP:654321}
+    aadhaar-demo-otp: ${SLATE_AADHAAR_OTP:123456}
     validity-seconds: 300
+  password-reset:
+    validity-minutes: ${SLATE_PASSWORD_RESET_MINUTES:15}
+  mail:
+    # Set enabled=true and provide the spring.mail SMTP settings outside local demo use.
+    enabled: ${SLATE_MAIL_ENABLED:false}
+    from: ${SLATE_MAIL_FROM:no-reply@slate.gov.in}
+    reset-base-url: ${SLATE_RESET_BASE_URL:http://localhost:5173/reset-password}
+    expose-demo-secrets: ${SLATE_EXPOSE_DEMO_SECRETS:true}
   aadhaar:
     # Raw Aadhaar is never persisted. Parties are stored as a salted SHA-256 hash
     # plus the last four digits; the salt itself lives outside the database.
     salt: ${SLATE_AADHAAR_SALT:local-demo-aadhaar-salt}
     salt-ref: ${SLATE_AADHAAR_SALT_REF:local-demo-v1}
+  pii:
+    # AES-256-GCM key (base64 of 32 bytes) for Aadhaar, PAN, mobile and address at rest.
+    # Keep it in a secret store; the local demo key is used when unset. Old keys stay
+    # readable via previous-keys ("v0:base64,...") after rotation.
+    key: ${SLATE_PII_KEY:}
+    key-id: ${SLATE_PII_KEY_ID:v1}
+    previous-keys: ${SLATE_PII_PREVIOUS_KEYS:}
   survey:
     tolerance-pct: ${SLATE_SURVEY_TOLERANCE_PCT:1.0}
+  vao:
+    visit-slots: ${SLATE_VAO_VISIT_SLOTS:09:00,10:30,12:00,14:30,16:00}
   connectors:
     mode: ${SLATE_CONNECTORS_MODE:MOCK}
     ec-base-url: ${SLATE_EC_BASE_URL:http://localhost:8080/mock/ec}
@@ -63,6 +97,11 @@ slate:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+
+management:
+  health:
+    mail:
+      enabled: ${SLATE_MAIL_ENABLED:false}
 
 logging:
   level:

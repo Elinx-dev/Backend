@@ -5,9 +5,11 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -37,6 +39,7 @@ import jakarta.validation.constraints.NotNull;
 @Service
 public class SurveyService {
 
+    private static final BigDecimal MAX_VARIANCE_PCT = new BigDecimal("99999999.9999");
     private static final BigDecimal HUNDRED = new BigDecimal("100");
 
     private final NamedParameterJdbcTemplate jdbc;
@@ -68,7 +71,10 @@ public class SurveyService {
     }
 
     public record ParcelInput(@NotNull BigDecimal extentValue, String extentUnit,
-                              List<OwnerShare> owners, Map<String, Object> geometryGeoJson) {
+                              List<OwnerShare> owners, Map<String, Object> geometryGeoJson,
+                              String officialSubdivisionNo, String propertyRef, String surveyNo,
+                              String boundaryNorth, String boundarySouth, String boundaryEast,
+                              String boundaryWest) {
     }
 
     public record OwnerShare(String name, BigDecimal sharePct) {
@@ -89,59 +95,31 @@ public class SurveyService {
                                     List<BoundaryPointInput> boundaryPoints, List<ParcelInput> parcels) {
     }
 
+    /** Books the caller's own visit slot; the other officer doesn't need to accept it. */
     @Transactional
     public Map<String, Object> proposeVisit(String txnRef, VisitRequest req) {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("SURVEY_SCHEDULE");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
+        requireAssignedSurveyor(ctx, user);
         String role = req.role() != null ? req.role() : (user.hasRole("VAO") ? "VAO" : "SURVEYOR");
-
-        var existing = jdbc.queryForList("""
-                SELECT id, status, proposed_by_role FROM survey.site_visit
-                 WHERE transaction_id = :txnId AND status IN ('PROPOSED','COUNTER_PROPOSED')
-                 ORDER BY id DESC LIMIT 1
-                """, new MapSqlParameterSource("txnId", ctx.id()));
-
-        if (!existing.isEmpty() && !role.equals(existing.get(0).get("proposed_by_role"))) {
-            long visitId = ((Number) existing.get(0).get("id")).longValue();
-            jdbc.update("""
-                    UPDATE survey.site_visit SET counter_visit_date = :date, counter_visit_time = :time,
-                           counter_by_role = :role, status = 'COUNTER_PROPOSED'
-                     WHERE id = :id
-                    """, new MapSqlParameterSource().addValue("id", visitId).addValue("date", req.visitDate())
-                    .addValue("time", req.visitTime()).addValue("role", role));
-            audit.record("SURVEY_VISIT_COUNTER_PROPOSED", "SITE_VISIT", String.valueOf(visitId), txnRef,
-                    ctx.propertyRef(), Map.of("visitDate", req.visitDate().toString()), null);
-            return visit(visitId);
-        }
 
         var keyHolder = new GeneratedKeyHolder();
         jdbc.update("""
                 INSERT INTO survey.site_visit (state_code, transaction_id, proposed_by_role, proposed_by_user_id,
-                    visit_date, visit_time, status)
-                VALUES (:stateCode, :txnId, :role, :userId, :date, :time, 'PROPOSED')
+                    visit_date, visit_time, status, visit_purpose, accepted_at)
+                VALUES (:stateCode, :txnId, :role, :userId, :date, :time, 'ACCEPTED', :purpose, now())
                 """, new MapSqlParameterSource()
                 .addValue("stateCode", ctx.transaction().get("state_code"))
                 .addValue("txnId", ctx.id())
                 .addValue("role", role)
+                .addValue("purpose", "VAO".equals(role) ? "FIELD_VERIFICATION" : "FIELD_SURVEY")
                 .addValue("userId", user.id())
                 .addValue("date", req.visitDate())
                 .addValue("time", req.visitTime()), keyHolder, new String[]{"id"});
         long visitId = keyHolder.getKey().longValue();
-        audit.record("SURVEY_VISIT_PROPOSED", "SITE_VISIT", String.valueOf(visitId), txnRef, ctx.propertyRef(),
+        audit.record("SURVEY_VISIT_BOOKED", "SITE_VISIT", String.valueOf(visitId), txnRef, ctx.propertyRef(),
                 Map.of("visitDate", req.visitDate().toString(), "role", role), null);
-        return visit(visitId);
-    }
-
-    @Transactional
-    public Map<String, Object> acceptVisit(String txnRef, long visitId) {
-        CurrentUser user = CurrentUser.require();
-        user.requirePermission("SURVEY_SCHEDULE");
-        TransactionContext ctx = repository.load(txnRef, user.stateCode());
-        jdbc.update("UPDATE survey.site_visit SET status = 'ACCEPTED' WHERE id = :id AND transaction_id = :txnId",
-                new MapSqlParameterSource().addValue("id", visitId).addValue("txnId", ctx.id()));
-        audit.record("SURVEY_VISIT_ACCEPTED", "SITE_VISIT", String.valueOf(visitId), txnRef, ctx.propertyRef(),
-                Map.of("visitId", visitId), null);
         return visit(visitId);
     }
 
@@ -175,20 +153,38 @@ public class SurveyService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("SURVEY_SUBMIT");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
+        requireAssignedSurveyor(ctx, user);
         if (!"SURVEY_PENDING".equals(ctx.status())) {
             throw ApiException.conflict("Survey can only be submitted while the transaction is SURVEY_PENDING");
         }
 
-        BigDecimal recordedExtent = new BigDecimal(ctx.property().get("extent_value").toString());
-        BigDecimal variance = recordedExtent.signum() == 0 ? BigDecimal.ZERO
-                : req.measuredExtent().subtract(recordedExtent).abs()
-                .divide(recordedExtent, 6, RoundingMode.HALF_UP).multiply(HUNDRED)
-                .setScale(4, RoundingMode.HALF_UP);
-        boolean withinTolerance = variance.compareTo(defaultTolerancePct) <= 0;
-
         Long visitId = jdbc.query("""
-                SELECT id FROM survey.site_visit WHERE transaction_id = :txnId ORDER BY id DESC LIMIT 1
+                SELECT id FROM survey.site_visit
+                 WHERE transaction_id = :txnId AND visit_purpose = 'FIELD_SURVEY'
+                   AND status IN ('ACCEPTED','COMPLETED')
+                 ORDER BY id DESC LIMIT 1
                 """, new MapSqlParameterSource("txnId", ctx.id()), rs -> rs.next() ? rs.getLong(1) : null);
+        if (visitId == null) {
+            throw ApiException.conflict("Book your site-visit slot before submitting the survey");
+        }
+        validateCoordinates(req);
+
+        BigDecimal recordedExtent = new BigDecimal(ctx.property().get("extent_value").toString());
+        String recordedUnit = (String) ctx.property().get("extent_unit");
+        String measuredUnit = req.extentUnit() == null || req.extentUnit().isBlank()
+                ? recordedUnit : AreaUnits.code(req.extentUnit());
+        BigDecimal measuredInRecordUnit = AreaUnits.convert(req.measuredExtent(), measuredUnit, recordedUnit);
+        List<Map<String, Object>> children = ctx.subdivisionAtRegistration()
+                ? registration.childProperties(ctx.id()) : List.of();
+        if (!children.isEmpty()) {
+            validateSubdivisionParcels(req, children, measuredUnit);
+        }
+        BigDecimal variance = recordedExtent.signum() == 0 ? BigDecimal.ZERO
+                : measuredInRecordUnit.subtract(recordedExtent).abs()
+                .divide(recordedExtent, 6, RoundingMode.HALF_UP).multiply(HUNDRED)
+                .setScale(4, RoundingMode.HALF_UP)
+                .min(MAX_VARIANCE_PCT);
+        boolean withinTolerance = variance.compareTo(defaultTolerancePct) <= 0;
 
         var keyHolder = new GeneratedKeyHolder();
         jdbc.update("""
@@ -196,10 +192,12 @@ public class SurveyService {
                     subdivision_no, old_survey_reference, fmb_sketch_reference, authoritative_recorded_extent,
                     measured_extent, extent_unit, variance_pct, tolerance_pct, within_tolerance, survey_date,
                     centroid_lat, centroid_lon, boundary_north, boundary_south, boundary_east, boundary_west,
-                    site_notes, resulting_parcel_count, submitted_by, attestation_user_ref, routed_to)
+                    site_notes, resulting_parcel_count, submitted_by, attestation_user_ref, routed_to,
+                    measured_extent_in_record_unit, boundary_geojson)
                 VALUES (:stateCode, :txnId, :visitId, :purpose, :surveyNo, :subdivisionNo, :oldSurveyRef, :fmb,
                     :recordedExtent, :measuredExtent, :extentUnit, :variance, :tolerance, :within, :surveyDate,
-                    :lat, :lon, :north, :south, :east, :west, :notes, :parcelCount, :userId, :attestation, :routedTo)
+                    :lat, :lon, :north, :south, :east, :west, :notes, :parcelCount, :userId, :attestation, :routedTo,
+                    :measuredInRecordUnit, cast(:geojson AS jsonb))
                 """, new MapSqlParameterSource()
                 .addValue("stateCode", ctx.transaction().get("state_code"))
                 .addValue("txnId", ctx.id())
@@ -211,7 +209,9 @@ public class SurveyService {
                 .addValue("fmb", req.fmbSketchReference())
                 .addValue("recordedExtent", recordedExtent)
                 .addValue("measuredExtent", req.measuredExtent())
-                .addValue("extentUnit", req.extentUnit() != null ? req.extentUnit() : ctx.property().get("extent_unit"))
+                .addValue("extentUnit", measuredUnit)
+                .addValue("measuredInRecordUnit", measuredInRecordUnit)
+                .addValue("geojson", polygonGeoJson(req.boundaryPoints()))
                 .addValue("variance", variance)
                 .addValue("tolerance", defaultTolerancePct)
                 .addValue("within", withinTolerance)
@@ -230,23 +230,37 @@ public class SurveyService {
                 keyHolder, new String[]{"id"});
         long submissionId = keyHolder.getKey().longValue();
 
+        if (withinTolerance) {
+            jdbc.update("UPDATE survey.site_visit SET status = 'COMPLETED' WHERE id = :id",
+                    new MapSqlParameterSource("id", visitId));
+        }
         saveSegments(submissionId, req.segments());
         saveBoundaryPoints(submissionId, req.boundaryPoints());
-        List<Map<String, Object>> childTokens = saveParcels(ctx, submissionId, req.parcels());
+        List<Map<String, Object>> childTokens = children.isEmpty()
+                ? saveParcels(ctx, submissionId, req.parcels())
+                : updateSubdivisionProperties(submissionId, req.parcels(), measuredUnit, withinTolerance);
 
         audit.record("SURVEY_SUBMITTED", "SURVEY_SUBMISSION", String.valueOf(submissionId), txnRef, ctx.propertyRef(),
-                Map.of("measuredExtent", req.measuredExtent(), "variancePct", variance,
+                Map.of("measuredExtent", req.measuredExtent(), "extentUnit", String.valueOf(measuredUnit),
+                        "variancePct", variance,
                         "withinTolerance", withinTolerance), null);
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("submissionId", submissionId);
+        out.put("measuredExtentInRecordUnit", measuredInRecordUnit);
         out.put("variancePct", variance);
         out.put("tolerancePct", defaultTolerancePct);
         out.put("withinTolerance", withinTolerance);
         out.put("routedTo", withinTolerance ? "VAO_VERIFICATION" : "SURVEY_CORRECTION_REVIEW");
         out.put("childTokens", childTokens);
 
-        if (withinTolerance) {
+        if (withinTolerance && !children.isEmpty()) {
+            TransactionContext reloaded = repository.load(txnRef, user.stateCode());
+            out.put("status", workflow.apply(reloaded, "SUBMIT_SUBDIVISION_SURVEY", null, user));
+            tokens.annotateChildren((String) ctx.transaction().get("state_code"), ctx.id(),
+                    new TokenService.ChainEvent("SUBMIT_SUBDIVISION_SURVEY", "SURVEYOR", user.id(), "APPROVED",
+                            "SURVEY_APPROVED", req.siteNotes()));
+        } else if (withinTolerance) {
             TransactionContext reloaded = repository.load(txnRef, user.stateCode());
             long registrationId = jdbc.queryForObject(
                     "SELECT id FROM core.registration_result WHERE transaction_id = :id",
@@ -262,7 +276,64 @@ public class SurveyService {
         return out;
     }
 
+    private static void validateCoordinates(SubmissionRequest req) {
+        if (req.measuredExtent().signum() <= 0) {
+            throw ApiException.badRequest("Measured extent must be greater than zero");
+        }
+        requireCoordinate(req.centroidLat(), 90, "Latitude");
+        requireCoordinate(req.centroidLon(), 180, "Longitude");
+        if (req.boundaryPoints() != null) {
+            for (BoundaryPointInput point : req.boundaryPoints()) {
+                requireCoordinate(point.latitude(), 90, "Polygon latitude");
+                requireCoordinate(point.longitude(), 180, "Polygon longitude");
+            }
+        }
+    }
+
+    private static void requireCoordinate(BigDecimal value, int limit, String label) {
+        if (value != null && value.abs().compareTo(BigDecimal.valueOf(limit)) > 0) {
+            throw ApiException.badRequest(label + " must be between -" + limit + " and " + limit);
+        }
+    }
+
+    /** The polygon vertices as a closed GeoJSON ring, or null when fewer than three were captured. */
+    private String polygonGeoJson(List<BoundaryPointInput> points) {
+        if (points == null) {
+            return null;
+        }
+        List<List<BigDecimal>> ring = new ArrayList<>();
+        for (BoundaryPointInput point : points) {
+            if (point.latitude() != null && point.longitude() != null) {
+                ring.add(List.of(point.longitude(), point.latitude()));
+            }
+        }
+        if (ring.size() < 3) {
+            return null;
+        }
+        ring.add(ring.get(0));
+        return json(Map.of("type", "Polygon", "coordinates", List.of(ring)));
+    }
+
+    /** When a surveyor was assigned at initiation, only that surveyor may act as SURVEYOR. */
+    private void requireAssignedSurveyor(TransactionContext ctx, CurrentUser user) {
+        Object assigned = ctx.transaction().get("assigned_surveyor_id");
+        if (assigned != null && user.hasRole("SURVEYOR") && !user.hasRole("VAO")
+                && ((Number) assigned).longValue() != user.id()) {
+            throw ApiException.forbidden("This survey is assigned to another surveyor");
+        }
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
     private String surveyPurpose(TransactionContext ctx) {
+        if (Boolean.TRUE.equals(ctx.transaction().get("subdivision_required"))) {
+            return ctx.deedTypeCode() + "_SUBDIVISION";
+        }
+        if (Boolean.TRUE.equals(ctx.transaction().get("survey_required_by_party"))) {
+            return "PARTY_REQUESTED_SURVEY";
+        }
         return switch (ctx.deedTypeCode()) {
             case "PARTITION" -> "PARTITION_SUBDIVISION";
             case "SALE_PARTIAL_SUBDIVISION" -> "SALE_SUBDIVISION";
@@ -336,7 +407,7 @@ public class SurveyService {
                         guideline_value, guideline_value_reference, parent_property_id, created_by)
                     SELECT p.state_code, :childRef, p.property_type_code, 'PARTITION', p.land_type_code,
                            p.classification_code, :extent, :extentUnit, p.survey_no,
-                           coalesce(p.subdivision_no,'') || '-' || :seq, p.subdivision_no, p.district_code,
+                           :officialSubdivisionNo, p.subdivision_no, p.district_code,
                            p.taluk_code, p.village_code, p.sro_code, p.street, p.door_no, p.guideline_value,
                            p.guideline_value_reference, p.id, :userId
                       FROM core.property p WHERE p.id = :parentId
@@ -345,7 +416,7 @@ public class SurveyService {
                     .addValue("extent", parcel.extentValue())
                     .addValue("extentUnit", parcel.extentUnit() != null ? parcel.extentUnit()
                             : ctx.property().get("extent_unit"))
-                    .addValue("seq", String.valueOf(seq))
+                    .addValue("officialSubdivisionNo", blankToNull(parcel.officialSubdivisionNo()))
                     .addValue("parentId", parentPropertyId)
                     .addValue("userId", CurrentUser.require().id()), keyHolder, new String[]{"id"});
             long childPropertyId = keyHolder.getKey().longValue();
@@ -368,9 +439,9 @@ public class SurveyService {
 
             jdbc.update("""
                     INSERT INTO survey.resulting_parcel (submission_id, seq, extent_value, extent_unit,
-                        intended_owner_mapping, child_property_id, geometry_geojson)
+                        intended_owner_mapping, child_property_id, geometry_geojson, official_subdivision_no)
                     VALUES (:submissionId, :seq, :extent, :extentUnit, cast(:owners AS jsonb), :childPropertyId,
-                        cast(:geometry AS jsonb))
+                        cast(:geometry AS jsonb), :officialSubdivisionNo)
                     """, new MapSqlParameterSource()
                     .addValue("submissionId", submissionId)
                     .addValue("seq", seq)
@@ -379,6 +450,7 @@ public class SurveyService {
                             : ctx.property().get("extent_unit"))
                     .addValue("owners", json(parcel.owners() == null ? List.of() : parcel.owners()))
                     .addValue("childPropertyId", childPropertyId)
+                    .addValue("officialSubdivisionNo", blankToNull(parcel.officialSubdivisionNo()))
                     .addValue("geometry", parcel.geometryGeoJson() == null ? null : json(parcel.geometryGeoJson())));
 
             children.add(new TokenService.ChildParcel(childRef, childPropertyId, owners));
@@ -396,6 +468,97 @@ public class SurveyService {
                     .addValue("seq", i + 1));
         }
         return minted;
+    }
+
+    /** The Surveyor corrects the survey number, subdivision, extent and boundaries of each new property. */
+    private void validateSubdivisionParcels(SubmissionRequest req, List<Map<String, Object>> children,
+                                            String measuredUnit) {
+        List<ParcelInput> parcels = req.parcels() == null ? List.of() : req.parcels();
+        Set<String> expected = new HashSet<>();
+        children.forEach(child -> expected.add((String) child.get("property_ref")));
+        Set<String> given = new HashSet<>();
+        Set<String> numbers = new HashSet<>();
+        BigDecimal total = BigDecimal.ZERO;
+        for (ParcelInput parcel : parcels) {
+            String ref = blankToNull(parcel.propertyRef());
+            if (ref == null || !expected.contains(ref) || !given.add(ref)) {
+                throw ApiException.badRequest("Survey details must be given once for each new property: "
+                        + String.join(", ", expected));
+            }
+            if (blankToNull(parcel.surveyNo()) == null) {
+                throw ApiException.badRequest("Enter the survey number of " + ref);
+            }
+            String number = parcel.surveyNo().trim() + "/" + (blankToNull(parcel.officialSubdivisionNo()) == null
+                    ? "" : parcel.officialSubdivisionNo().trim());
+            if (!numbers.add(number.toUpperCase())) {
+                throw ApiException.badRequest("Survey number " + number + " is used for more than one property");
+            }
+            if (parcel.extentValue() == null || parcel.extentValue().signum() <= 0) {
+                throw ApiException.badRequest("Enter the extent of " + ref);
+            }
+            if (blankToNull(parcel.boundaryNorth()) == null || blankToNull(parcel.boundarySouth()) == null
+                    || blankToNull(parcel.boundaryEast()) == null || blankToNull(parcel.boundaryWest()) == null) {
+                throw ApiException.badRequest("Enter the north, south, east and west boundaries of " + ref);
+            }
+            String unit = blankToNull(parcel.extentUnit()) == null ? measuredUnit : AreaUnits.code(parcel.extentUnit());
+            total = total.add(AreaUnits.convert(parcel.extentValue(), unit, measuredUnit));
+        }
+        if (!given.equals(expected)) {
+            throw ApiException.badRequest("Survey details must be given once for each new property: "
+                    + String.join(", ", expected));
+        }
+        BigDecimal measured = req.measuredExtent();
+        BigDecimal difference = total.subtract(measured).abs().divide(measured, 6, RoundingMode.HALF_UP).multiply(HUNDRED);
+        if (difference.compareTo(defaultTolerancePct) > 0) {
+            throw ApiException.badRequest("The new properties add up to " + total.stripTrailingZeros().toPlainString()
+                    + " but the measured extent is " + measured.stripTrailingZeros().toPlainString()
+                    + "; they must match within " + defaultTolerancePct.stripTrailingZeros().toPlainString() + "%");
+        }
+    }
+
+    private List<Map<String, Object>> updateSubdivisionProperties(long submissionId, List<ParcelInput> parcels,
+                                                                  String measuredUnit, boolean apply) {
+        int seq = 1;
+        for (ParcelInput parcel : parcels) {
+            String unit = blankToNull(parcel.extentUnit()) == null ? measuredUnit : AreaUnits.code(parcel.extentUnit());
+            MapSqlParameterSource params = new MapSqlParameterSource()
+                    .addValue("ref", parcel.propertyRef().trim())
+                    .addValue("submissionId", submissionId)
+                    .addValue("seq", seq++)
+                    .addValue("surveyNo", parcel.surveyNo().trim())
+                    .addValue("subdivisionNo", blankToNull(parcel.officialSubdivisionNo()))
+                    .addValue("extent", parcel.extentValue())
+                    .addValue("unit", unit)
+                    .addValue("north", parcel.boundaryNorth().trim())
+                    .addValue("south", parcel.boundarySouth().trim())
+                    .addValue("east", parcel.boundaryEast().trim())
+                    .addValue("west", parcel.boundaryWest().trim());
+            jdbc.update("""
+                    INSERT INTO survey.resulting_parcel (submission_id, seq, extent_value, extent_unit,
+                        intended_owner_mapping, child_property_id, child_token_id, official_subdivision_no,
+                        survey_no, boundary_north, boundary_south, boundary_east, boundary_west)
+                    SELECT :submissionId, :seq, :extent, :unit,
+                           (SELECT coalesce(jsonb_agg(jsonb_build_object('name', o.owner_name)), '[]'::jsonb)
+                              FROM core.property_owner o WHERE o.property_id = p.id AND o.effective_to IS NULL),
+                           p.id, p.token_id, :subdivisionNo, :surveyNo, :north, :south, :east, :west
+                      FROM core.property p WHERE p.property_ref = :ref
+                    """, params);
+            if (apply) {
+                jdbc.update("""
+                        UPDATE core.property SET survey_no = :surveyNo, subdivision_no = :subdivisionNo,
+                               extent_value = :extent, extent_unit = :unit, boundary_north = :north,
+                               boundary_south = :south, boundary_east = :east, boundary_west = :west
+                         WHERE property_ref = :ref
+                        """, params);
+                jdbc.update("""
+                        UPDATE core.property_survey s SET survey_no = :surveyNo, subdivision_no = :subdivisionNo,
+                               extent_value = :extent, extent_unit = :unit
+                          FROM core.property p
+                         WHERE s.property_id = p.id AND p.property_ref = :ref AND s.seq = 1
+                        """, params);
+            }
+        }
+        return List.of();
     }
 
     public List<Map<String, Object>> submissions(String txnRef) {

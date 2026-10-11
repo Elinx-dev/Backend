@@ -160,5 +160,363 @@
     "coverageStatus": "NONE",
     "coverageNote": "Source registry did not respond",
     "entries": []
+  },
+
+  "KARAPAKKAM|310|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000201",
+    "issuedBy": "SRO Sholinganallur",
+    "issuedOn": "2026-10-01",
+    "periodFrom": "1990-01-01",
+    "periodTo": "2026-10-01",
+    "coverageStatus": "FULL",
+    "entries": [
+      {
+        "entryNo": "1",
+        "entryDate": "2008-06-14",
+        "nature": "Sale",
+        "documentNo": "1287/2008",
+        "previousDocumentReference": null,
+        "executants": [
+          "Sundaram Pillai"
+        ],
+        "claimants": [
+          "Meena Rajan"
+        ],
+        "amount": 2500000,
+        "lender": null,
+        "schedule": {
+          "village": "KARAPAKKAM",
+          "surveyNo": "310",
+          "subdivisionNo": "1",
+          "extent": 2400,
+          "extentUnit": "SQ_FT",
+          "doorNo": null,
+          "plotNo": null,
+          "boundaries": "N: Road, S: Canal, E: Plot 12, W: Plot 14"
+        },
+        "remarks": "Absolute sale"
+      },
+      {
+        "entryNo": "2",
+        "entryDate": "2015-02-03",
+        "nature": "Mortgage by Deposit of Title Deeds",
+        "documentNo": "2290/2015",
+        "previousDocumentReference": null,
+        "executants": [
+          "Prakash Iyer"
+        ],
+        "claimants": [
+          "Indian Bank"
+        ],
+        "amount": 900000,
+        "lender": "Indian Bank",
+        "schedule": {
+          "village": "KARAPAKKAM",
+          "surveyNo": "412",
+          "subdivisionNo": "3",
+          "extent": 2400,
+          "extentUnit": "SQ_FT",
+          "doorNo": null,
+          "plotNo": null,
+          "boundaries": "N: Road, S: Canal, E: Plot 12, W: Plot 14"
+        },
+        "remarks": "Mortgage of a different parcel listed in the same search"
+      }
+    ]
+  },
+
+  "KARAPAKKAM|215|4": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000202",
+    "issuedBy": "SRO Sholinganallur",
+    "issuedOn": "2026-10-01",
+    "periodFrom": "1990-01-01",
+    "periodTo": "2026-10-01",
+    "coverageStatus": "FULL",
+    "entries": [
+      {
+        "entryNo": "1",
+        "entryDate": "2011-09-21",
+        "nature": "Sale",
+        "documentNo": "845/2011",
+        "previousDocumentReference": null,
+        "executants": [
+          "Raghavan K"
+        ],
+        "claimants": [
+          "Arun Prakash"
+        ],
+        "amount": 1800000,
+        "lender": null,
+        "schedule": {
+          "village": "KARAPAKKAM",
+          "surveyNo": "215",
+          "subdivisionNo": "4",
+          "extent": 2400,
+          "extentUnit": "SQ_FT",
+          "doorNo": null,
+          "plotNo": null,
+          "boundaries": "N: Road, S: Canal, E: Plot 12, W: Plot 14"
+        },
+        "remarks": "Absolute sale"
+      },
+      {
+        "entryNo": "2",
+        "entryDate": "2016-04-11",
+        "nature": "Mortgage by Deposit of Title Deeds",
+        "documentNo": "181/2016",
+        "previousDocumentReference": null,
+        "executants": [
+          "Arun Prakash"
+        ],
+        "claimants": [
+          "State Bank of India"
+        ],
+        "amount": 1200000,
+        "lender": "State Bank of India",
+        "schedule": {
+          "village": "KARAPAKKAM",
+          "surveyNo": "215",
+          "subdivisionNo": "4",
+          "extent": 2400,
+          "extentUnit": "SQ_FT",
+          "doorNo": null,
+          "plotNo": null,
+          "boundaries": "N: Road, S: Canal, E: Plot 12, W: Plot 14"
+        },
+        "remarks": "Housing loan mortgage"
+      },
+      {
+        "entryNo": "3",
+        "entryDate": "2017-08-30",
+        "nature": "Receipt",
+        "documentNo": "176/2017",
+        "previousDocumentReference": "181/2016",
+        "executants": [
+          "State Bank of India"
+        ],
+        "claimants": [
+          "Arun Prakash"
+        ],
+        "amount": 1200000,
+        "lender": "State Bank of India",
+        "schedule": {
+          "village": "KARAPAKKAM",
+          "surveyNo": "215",
+          "subdivisionNo": "4",
+          "extent": 2400,
+          "extentUnit": "SQ_FT",
+          "doorNo": null,
+          "plotNo": null,
+          "boundaries": "N: Road, S: Canal, E: Plot 12, W: Plot 14"
+        },
+        "remarks": "Loan closed; mortgage 181/2016 discharged"
+      }
+    ]
+  },
+
+  "KARAPAKKAM|330|2": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000203",
+    "issuedBy": "SRO Sholinganallur",
+    "issuedOn": "2026-10-01",
+    "periodFrom": "1990-01-01",
+    "periodTo": "2026-10-01",
+    "coverageStatus": "FULL",
+    "entries": [
+      {
+        "entryNo": "1",
+        "entryDate": "2009-01-19",
+        "nature": "Sale",
+        "documentNo": "602/2009",
+        "previousDocumentReference": null,
+        "executants": [
+          "Gopalan R"
+        ],
+        "claimants": [
+          "Senthil Kumar"
+        ],
+        "amount": 1500000,
+        "lender": null,
+        "schedule": {
+          "village": "KARAPAKKAM",
+          "surveyNo": "330",
+          "subdivisionNo": "2",
+          "extent": 2400,
+          "extentUnit": "SQ_FT",
+          "doorNo": null,
+          "plotNo": null,
+          "boundaries": "N: Road, S: Canal, E: Plot 12, W: Plot 14"
+        },
+        "remarks": "Absolute sale"
+      },
+      {
+        "entryNo": "2",
+        "entryDate": "2022-07-05",
+        "nature": "Court Order",
+        "documentNo": "88/2022",
+        "previousDocumentReference": null,
+        "executants": [
+          "District Court, Chennai"
+        ],
+        "claimants": [
+          "Senthil Kumar"
+        ],
+        "amount": null,
+        "lender": null,
+        "schedule": {
+          "village": "KARAPAKKAM",
+          "surveyNo": "330",
+          "subdivisionNo": "2",
+          "extent": 2400,
+          "extentUnit": "SQ_FT",
+          "doorNo": null,
+          "plotNo": null,
+          "boundaries": "N: Road, S: Canal, E: Plot 12, W: Plot 14"
+        },
+        "remarks": "Attachment before judgment in O.S. No. 214/2022; the property is attached"
+      }
+    ]
+  },
+
+  "KARAPAKKAM|340|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000204",
+    "issuedBy": "SRO Sholinganallur",
+    "issuedOn": "2026-10-01",
+    "periodFrom": "1990-01-01",
+    "periodTo": "2026-10-01",
+    "coverageStatus": "FULL",
+    "entries": [
+      {
+        "entryNo": "1",
+        "entryDate": "2012-03-08",
+        "nature": "Sale",
+        "documentNo": "377/2012",
+        "previousDocumentReference": null,
+        "executants": [
+          "Mohan Das"
+        ],
+        "claimants": [
+          "Kavitha Ramesh"
+        ],
+        "amount": 2100000,
+        "lender": null,
+        "schedule": {
+          "village": "KARAPAKKAM",
+          "surveyNo": "340",
+          "subdivisionNo": "1",
+          "extent": 2400,
+          "extentUnit": "SQ_FT",
+          "doorNo": null,
+          "plotNo": null,
+          "boundaries": "N: Road, S: Canal, E: Plot 12, W: Plot 14"
+        },
+        "remarks": "Absolute sale"
+      },
+      {
+        "entryNo": "2",
+        "entryDate": "2021-11-22",
+        "nature": "Simple Mortgage",
+        "documentNo": "455/2021",
+        "previousDocumentReference": null,
+        "executants": [
+          "Kavitha Ramesh"
+        ],
+        "claimants": [
+          "Canara Bank"
+        ],
+        "amount": 1600000,
+        "lender": "Canara Bank",
+        "schedule": {
+          "village": "KARAPAKKAM",
+          "surveyNo": "340",
+          "subdivisionNo": "1",
+          "extent": 2400,
+          "extentUnit": "SQ_FT",
+          "doorNo": null,
+          "plotNo": null,
+          "boundaries": "N: Road, S: Canal, E: Plot 12, W: Plot 14"
+        },
+        "remarks": "Business loan; no discharge on record"
+      }
+    ]
+  },
+
+  "KARAPAKKAM|100A|": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000205",
+    "issuedBy": "SRO Sholinganallur",
+    "issuedOn": "2026-10-01",
+    "periodFrom": "1990-01-01",
+    "periodTo": "2026-10-01",
+    "coverageStatus": "FULL",
+    "entries": [
+      {
+        "entryNo": "1",
+        "entryDate": "2004-05-17",
+        "nature": "Sale",
+        "documentNo": "300/2004",
+        "previousDocumentReference": null,
+        "executants": [
+          "Natarajan S"
+        ],
+        "claimants": [
+          "Ravi Shankar"
+        ],
+        "amount": 900000,
+        "lender": null,
+        "schedule": {
+          "village": "KARAPAKKAM",
+          "surveyNo": "100",
+          "subdivisionNo": null,
+          "extent": 2400,
+          "extentUnit": "SQ_FT",
+          "doorNo": null,
+          "plotNo": null,
+          "boundaries": "N: Road, S: Canal, E: Plot 12, W: Plot 14"
+        },
+        "remarks": "Sale of survey 100 before sub-division"
+      }
+    ]
+  },
+
+  "KARAPAKKAM|350|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000206",
+    "issuedBy": "SRO Sholinganallur",
+    "issuedOn": "2026-10-01",
+    "periodFrom": "1990-01-01",
+    "periodTo": "2026-10-01",
+    "coverageStatus": "FULL",
+    "entries": [
+      {
+        "entryNo": "1",
+        "entryDate": "2019-12-02",
+        "nature": "Court Decree",
+        "documentNo": "1021/2019",
+        "previousDocumentReference": null,
+        "executants": [
+          "Sub Court, Chennai"
+        ],
+        "claimants": [
+          "Lakshmi Narayanan"
+        ],
+        "amount": null,
+        "lender": null,
+        "schedule": {
+          "village": "KARAPAKKAM",
+          "surveyNo": "350",
+          "subdivisionNo": "1",
+          "extent": 2400,
+          "extentUnit": "SQ_FT",
+          "doorNo": null,
+          "plotNo": null,
+          "boundaries": "N: Road, S: Canal, E: Plot 12, W: Plot 14"
+        },
+        "remarks": "Final decree in partition suit O.S. No. 77/2017"
+      }
+    ]
   }
 }

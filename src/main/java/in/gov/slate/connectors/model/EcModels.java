@@ -26,10 +26,16 @@ public final class EcModels {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record EcCertificate(String responseStatus, String certificateNo, String issuedBy, LocalDate issuedOn,
                                 LocalDate periodFrom, LocalDate periodTo, String coverageStatus,
-                                String coverageNote, List<EcEntry> entries) {
+                                String coverageNote, List<EcEntry> entries, List<EcSurveyLink> surveyLinks) {
     }
 
-    public record EcRequest(String village, String surveyNo, String subdivisionNo, LocalDate searchFrom,
-                            LocalDate searchTo) {
+    /** An authoritative old-to-current survey/subdivision linkage supplied by the source registry. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record EcSurveyLink(String fromSurveyNo, String fromSubdivisionNo, String toSurveyNo,
+                               String toSubdivisionNo, String sourceReference) {
+    }
+
+    public record EcRequest(String district, String taluk, String village, String surveyNo, String subdivisionNo,
+                            LocalDate searchFrom, LocalDate searchTo) {
     }
 }

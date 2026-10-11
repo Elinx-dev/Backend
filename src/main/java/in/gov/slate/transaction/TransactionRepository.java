@@ -15,10 +15,13 @@ public class TransactionRepository {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ConfigService config;
+    private final in.gov.slate.common.PiiCrypto pii;
 
-    public TransactionRepository(NamedParameterJdbcTemplate jdbc, ConfigService config) {
+    public TransactionRepository(NamedParameterJdbcTemplate jdbc, ConfigService config,
+                                 in.gov.slate.common.PiiCrypto pii) {
         this.jdbc = jdbc;
         this.config = config;
+        this.pii = pii;
     }
 
     public TransactionContext load(String txnRef, String stateCode) {
@@ -37,16 +40,26 @@ public class TransactionRepository {
         Map<String, Object> property = jdbc.queryForList(
                 "SELECT * FROM core.property WHERE id = :propertyId", propParam).get(0);
 
-        List<Map<String, Object>> parties = jdbc.queryForList("""
+        List<Map<String, Object>> parties = pii.revealRows(jdbc.queryForList("""
                 SELECT id, side, role, seq, party_type, name, aadhaar_last4, karta_name, pan, address,
-                       relationship_code, existing_share_pct, share_transferred_pct, extent_transferred,
-                       resulting_share_pct, authority_poa_reference,
-                       (aadhaar_hash IS NOT NULL) AS aadhaar_captured
+                       relationship_code, extent_transferred, authority_poa_reference, owner_type_code,
+                       mobile, registration_no, representative_role, representative_name,
+                       representative_designation, representative_aadhaar_last4, representative_pan,
+                       representative_mobile,
+                       property_owner_id, (aadhaar_hash IS NOT NULL) AS aadhaar_captured, deceased,
+                       EXISTS (SELECT 1 FROM core.partition_member m
+                                WHERE m.party_id = transaction_party.id
+                                  AND m.death_cert_document_id IS NOT NULL
+                                  AND m.legal_heir_document_id IS NOT NULL) AS deceased_evidence_complete
                   FROM core.transaction_party WHERE transaction_id = :txnId ORDER BY side, seq
-                """, txnParam);
+                """, txnParam));
 
-        List<Map<String, Object>> witnesses = jdbc.queryForList(
-                "SELECT * FROM core.witness WHERE transaction_id = :txnId ORDER BY seq", txnParam);
+        List<Map<String, Object>> witnesses = pii.revealRows(jdbc.queryForList("""
+                SELECT id, transaction_id, seq, name, address, id_proof_type, id_proof_ref
+                  FROM core.witness
+                 WHERE transaction_id = :txnId AND is_active = 'Y'
+                 ORDER BY seq
+                """, txnParam));
 
         List<Map<String, Object>> consents = jdbc.queryForList("""
                 SELECT id, party_id, otp_request_reference, status, requested_at, verified_at, attempt_count
@@ -54,11 +67,19 @@ public class TransactionRepository {
                 """, txnParam);
 
         List<Map<String, Object>> ruleResults = jdbc.queryForList("""
-                SELECT r.engine, r.overall_outcome, r.reason_code, r.result_payload, r.advisory, r.checked_at
-                  FROM rules.rule_check_result r
-                  JOIN rules.rule_check_request q ON q.id = r.request_id
-                 WHERE q.transaction_id = :txnId
-                 ORDER BY r.checked_at DESC
+                                                                SELECT engine, overall_outcome, reason_code, result_payload, advisory, checked_at
+                                                                        FROM (
+                                                                                SELECT r.engine, r.overall_outcome, r.reason_code, r.result_payload, r.advisory, r.checked_at,
+                                                                                                         row_number() OVER (
+                                                                                                                         PARTITION BY r.engine
+                                                                                                                         ORDER BY r.checked_at DESC, q.requested_at DESC, r.id DESC
+                                                                                                         ) AS result_rank
+                                                                                        FROM rules.rule_check_result r
+                                                                                        JOIN rules.rule_check_request q ON q.id = r.request_id
+                                                                                 WHERE q.transaction_id = :txnId
+                                                                        ) latest
+                                                                 WHERE result_rank = 1
+                                                                 ORDER BY engine
                 """, txnParam);
 
         var fees = jdbc.queryForList("""
@@ -75,10 +96,13 @@ public class TransactionRepository {
                  WHERE s.transaction_id = :txnId ORDER BY rp.seq
                 """, txnParam);
 
-        List<Map<String, Object>> owners = jdbc.queryForList("""
-                SELECT owner_name, share_pct, source FROM core.property_owner
+        List<Map<String, Object>> owners = pii.revealRows(jdbc.queryForList("""
+                SELECT owner_type_code, owner_name, aadhaar_number, pan, mobile, address, registration_no,
+                       representative_role, representative_name, representative_designation, representative_aadhaar,
+                       representative_pan, representative_mobile, share_pct, source
+                  FROM core.property_owner
                  WHERE property_id = :propertyId AND effective_to IS NULL ORDER BY id
-                """, propParam);
+                """, propParam));
 
         Map<String, Object> deedType = config.deedType(stateCode, (String) txn.get("deed_type_code"));
 

@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 
 import in.gov.slate.common.ValidationException;
 import in.gov.slate.config.ConfigService;
+import in.gov.slate.config.RuleOutcomePolicy;
 
 /**
  * Evaluates the cross-field rules configured in cfg.validation_rule. Each
@@ -26,7 +27,6 @@ import in.gov.slate.config.ConfigService;
 public class ValidationEngine {
 
     private static final Pattern PAN = Pattern.compile("^[A-Z]{5}[0-9]{4}[A-Z]$");
-    private static final BigDecimal HUNDRED = new BigDecimal("100");
     private static final BigDecimal SHARE_EPSILON = new BigDecimal("0.0100");
 
     private final ConfigService config;
@@ -67,8 +67,10 @@ public class ValidationEngine {
     }
 
     private void register() {
+        // Living co-owners can partition among themselves, so a Partition may have no SIDE_2 heirs.
         predicates.put("minOnePartyPerSide", ctx ->
-                !ctx.side("SIDE_1").isEmpty() && !ctx.side("SIDE_2").isEmpty());
+                !ctx.side("SIDE_1").isEmpty()
+                        && ("PARTITION".equals(ctx.deedTypeCode()) || !ctx.side("SIDE_2").isEmpty()));
 
         predicates.put("witnessMinimumMet", ctx -> {
             boolean required = Boolean.TRUE.equals(ctx.deedType().get("witness_required"));
@@ -79,7 +81,8 @@ public class ValidationEngine {
         predicates.put("partiesAndWitnessesComplete", ctx ->
                 predicates.get("minOnePartyPerSide").test(ctx)
                         && predicates.get("witnessMinimumMet").test(ctx)
-                        && ctx.parties().stream().allMatch(p -> Boolean.TRUE.equals(p.get("aadhaar_captured"))));
+                        && ctx.parties().stream().filter(p -> !Boolean.TRUE.equals(p.get("deceased")))
+                                .allMatch(p -> Boolean.TRUE.equals(p.get("aadhaar_captured"))));
 
         predicates.put("allPartiesConsentVerified", ctx -> {
             if (ctx.parties().isEmpty()) {
@@ -89,19 +92,16 @@ public class ValidationEngine {
                     .filter(c -> "VERIFIED".equals(c.get("status")))
                     .map(c -> ((Number) c.get("party_id")).longValue())
                     .toList();
+            // Deceased owners in a Partition give no Aadhaar OTP; their living successors do.
             return ctx.parties().stream()
+                    .filter(p -> !Boolean.TRUE.equals(p.get("deceased")))
                     .allMatch(p -> verified.contains(((Number) p.get("id")).longValue()));
         });
 
         predicates.put("sideTotalsReconcile", ctx -> {
-            BigDecimal given = sum(ctx.side("SIDE_1"), "share_transferred_pct");
-            BigDecimal received = sum(ctx.side("SIDE_2"), "share_transferred_pct");
-            if (given.signum() == 0 && received.signum() == 0) {
-                BigDecimal givenExtent = sum(ctx.side("SIDE_1"), "extent_transferred");
-                BigDecimal receivedExtent = sum(ctx.side("SIDE_2"), "extent_transferred");
-                return givenExtent.subtract(receivedExtent).abs().compareTo(SHARE_EPSILON) <= 0;
-            }
-            return given.subtract(received).abs().compareTo(SHARE_EPSILON) <= 0;
+            BigDecimal givenExtent = sum(ctx.side("SIDE_1"), "extent_transferred");
+            BigDecimal receivedExtent = sum(ctx.side("SIDE_2"), "extent_transferred");
+            return givenExtent.subtract(receivedExtent).abs().compareTo(SHARE_EPSILON) <= 0;
         });
 
         predicates.put("guidelineValuePresent", ctx -> {
@@ -145,23 +145,6 @@ public class ValidationEngine {
                     .allMatch(p -> ownerNames.contains(normalise((String) p.get("name"))));
         });
 
-        predicates.put("releasedShareMatchesExisting", ctx -> {
-            for (Map<String, Object> releasor : ctx.side("SIDE_1")) {
-                BigDecimal declared = dec(releasor.get("share_transferred_pct"));
-                BigDecimal recorded = ctx.propertyOwners().stream()
-                        .filter(o -> normalise((String) o.get("owner_name"))
-                                .equals(normalise((String) releasor.get("name"))))
-                        .map(o -> dec(o.get("share_pct")))
-                        .filter(Objects::nonNull)
-                        .findFirst().orElse(null);
-                if (declared == null || recorded == null
-                        || declared.subtract(recorded).abs().compareTo(SHARE_EPSILON) > 0) {
-                    return false;
-                }
-            }
-            return true;
-        });
-
         predicates.put("subparcelCountAtLeastTwo", ctx -> {
             Object count = ctx.transaction().get("resulting_subparcel_count");
             return count != null && ((Number) count).intValue() >= 2;
@@ -181,15 +164,12 @@ public class ValidationEngine {
             return parent.subtract(children).abs().compareTo(tolerance) <= 0;
         });
 
-        predicates.put("sharesAgainstChildParcel", ctx -> {
-            BigDecimal received = sum(ctx.side("SIDE_2"), "share_transferred_pct");
-            return received.compareTo(BigDecimal.ZERO) > 0 && received.compareTo(HUNDRED) <= 0;
-        });
-
-        predicates.put("aadhaarIsTwelveDigits", ctx ->
-                ctx.parties().stream().allMatch(p -> Boolean.TRUE.equals(p.get("aadhaar_captured"))));
+        predicates.put("aadhaarIsTwelveDigits", ctx -> ctx.parties().stream()
+                .filter(p -> p.get("property_owner_id") == null)
+                .allMatch(p -> Boolean.TRUE.equals(p.get("aadhaar_captured"))));
 
         predicates.put("panFormatValid", ctx -> ctx.parties().stream()
+                .filter(p -> p.get("property_owner_id") == null)
                 .map(p -> (String) p.get("pan"))
                 .filter(ValidationEngine::notBlank)
                 .allMatch(pan -> PAN.matcher(pan).matches()));
@@ -228,15 +208,29 @@ public class ValidationEngine {
 
         // Workflow guards.
         predicates.put("ruleChecksRun", ctx -> !ctx.ruleResults().isEmpty());
+        predicates.put("ruleChecksPassed", ctx ->
+                !ctx.ruleResults().isEmpty() && blockingRuleResults(ctx).isEmpty());
         predicates.put("rulesAreAdvisory", ctx -> !config.rulesAreBlocking());
-        predicates.put("surveyRequired", TransactionContext::surveyRequired);
+        // A subdivision created at Register follows its own path: Register -> VAO -> Surveyor -> Tahsildar.
+        predicates.put("subdivisionRequired", TransactionContext::subdivisionAtRegistration);
+        predicates.put("surveyRequired", ctx -> ctx.surveyRequired() && !ctx.subdivisionAtRegistration());
         predicates.put("surveyNotRequired", ctx -> !ctx.surveyRequired());
-        predicates.put("surveyWithinTolerance", ctx -> true);
-        predicates.put("mutationVerified", ctx -> true);
+        predicates.put("surveyWithinTolerance", ctx -> !ctx.subdivisionAtRegistration());
+        predicates.put("mutationVerified", ctx -> !ctx.subdivisionAtRegistration());
         predicates.put("readyToRegister", ctx ->
                 predicates.get("allPartiesConsentVerified").test(ctx)
                         && predicates.get("feesFullyPaid").test(ctx)
-                        && predicates.get("ruleChecksRun").test(ctx));
+                        && predicates.get("ruleChecksPassed").test(ctx));
+    }
+
+    /** Latest rule results that the state's rule check outcome policy does not allow to proceed. */
+    public List<Map<String, Object>> blockingRuleResults(TransactionContext ctx) {
+        Map<String, RuleOutcomePolicy> policies =
+                config.ruleOutcomePolicies((String) ctx.transaction().get("state_code"));
+        return ctx.ruleResults().stream()
+                .filter(r -> policies.getOrDefault((String) r.get("engine"), RuleOutcomePolicy.DEFAULT)
+                        .blocks((String) r.get("overall_outcome"), (String) r.get("reason_code")))
+                .toList();
     }
 
     private static BigDecimal sum(List<Map<String, Object>> rows, String column) {

@@ -14,7 +14,10 @@ import in.gov.slate.common.ApiException;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.connectors.AadhaarConnector;
+import in.gov.slate.transaction.TransactionContext;
 import in.gov.slate.transaction.TransactionRepository;
+import in.gov.slate.transaction.TransactionService;
+import in.gov.slate.transaction.WorkflowEngine;
 
 /**
  * Aadhaar OTP consent, captured per party. Only the salted hash, the last four
@@ -26,27 +29,41 @@ public class ConsentService {
     private final NamedParameterJdbcTemplate jdbc;
     private final AadhaarConnector aadhaar;
     private final TransactionRepository repository;
+    private final WorkflowEngine workflow;
     private final AuditService audit;
+    private final TransactionService transactions;
 
     public ConsentService(NamedParameterJdbcTemplate jdbc, AadhaarConnector aadhaar,
-                          TransactionRepository repository, AuditService audit) {
+                          TransactionRepository repository, WorkflowEngine workflow, AuditService audit,
+                          TransactionService transactions) {
         this.jdbc = jdbc;
         this.aadhaar = aadhaar;
         this.repository = repository;
+        this.workflow = workflow;
         this.audit = audit;
+        this.transactions = transactions;
     }
 
     @Transactional
     public List<Map<String, Object>> requestOtp(String txnRef, List<Long> partyIds) {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("CONSENT_CAPTURE");
-        var ctx = repository.load(txnRef, user.stateCode());
+        TransactionContext ctx = repository.load(txnRef, user.stateCode());
+        if (transactions.fillMissingOwnerAadhaar(ctx)) {
+            ctx = repository.load(txnRef, user.stateCode());
+        }
+        if ("DRAFT".equals(ctx.status())) {
+            workflow.apply(ctx, "REQUEST_CONSENT", null, user);
+            ctx = repository.load(txnRef, user.stateCode());
+        }
+        workflow.requireStatus(ctx, "CONSENT_PENDING", "Consent OTP request", user);
         String consentTextVersion = consentTextVersion();
 
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> party : ctx.parties()) {
             long partyId = ((Number) party.get("id")).longValue();
-            if (partyIds != null && !partyIds.isEmpty() && !partyIds.contains(partyId)) {
+            if (partyIds != null && !partyIds.isEmpty() && !partyIds.contains(partyId)
+                    || Boolean.TRUE.equals(party.get("deceased"))) {
                 continue;
             }
             if (!Boolean.TRUE.equals(party.get("aadhaar_captured"))) {
@@ -57,7 +74,8 @@ public class ConsentService {
                     INSERT INTO core.consent_record (transaction_id, party_id, aadhaar_hash, otp_request_reference,
                         status, requested_at, officer_user_id, consent_text_version)
                     SELECT :txnId, p.id, p.aadhaar_hash, :reference, 'PENDING', now(), :officer, :consentVersion
-                      FROM core.transaction_party p WHERE p.id = :partyId
+                      FROM core.transaction_party p
+                     WHERE p.id = :partyId AND p.transaction_id = :txnId
                     ON CONFLICT (transaction_id, party_id) DO UPDATE
                         SET otp_request_reference = EXCLUDED.otp_request_reference,
                             status = 'PENDING',
@@ -94,6 +112,7 @@ public class ConsentService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("CONSENT_CAPTURE");
         var ctx = repository.load(txnRef, user.stateCode());
+        workflow.requireStatus(ctx, "CONSENT_PENDING", "Consent verification", user);
 
         var rows = jdbc.queryForList("""
                 SELECT id, otp_request_reference, status, attempt_count
@@ -104,7 +123,7 @@ public class ConsentService {
         }
         Map<String, Object> consent = rows.get(0);
         if ("VERIFIED".equals(consent.get("status"))) {
-            return Map.of("partyId", partyId, "status", "VERIFIED");
+            return verificationResult(partyId, ctx, user);
         }
         long consentId = ((Number) consent.get("id")).longValue();
         boolean ok = aadhaar.verifyOtp((String) consent.get("otp_request_reference"), otp);
@@ -125,7 +144,7 @@ public class ConsentService {
         if (!ok) {
             throw ApiException.badRequest("Incorrect OTP for this party");
         }
-        return Map.of("partyId", partyId, "status", "VERIFIED");
+        return verificationResult(partyId, repository.load(txnRef, user.stateCode()), user);
     }
 
     public List<Map<String, Object>> status(String txnRef) {
@@ -146,5 +165,33 @@ public class ConsentService {
         String value = jdbc.query("SELECT value_json #>> '{}' FROM master.system_config WHERE key = 'consent.text.version'",
                 new MapSqlParameterSource(), rs -> rs.next() ? rs.getString(1) : null);
         return value == null ? "CONSENT-V1" : value;
+    }
+
+    private Map<String, Object> verificationResult(long partyId, TransactionContext ctx, CurrentUser user) {
+        boolean allPartiesVerified = allPartiesVerified(ctx);
+        String transactionStatus = ctx.status();
+        if (allPartiesVerified && "CONSENT_PENDING".equals(transactionStatus)) {
+            transactionStatus = workflow.apply(ctx, "CONSENT_COMPLETE", null, user);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("partyId", partyId);
+        result.put("status", "VERIFIED");
+        result.put("allPartiesVerified", allPartiesVerified);
+        result.put("transactionStatus", transactionStatus);
+        return result;
+    }
+
+    private boolean allPartiesVerified(TransactionContext ctx) {
+        if (ctx.parties().isEmpty()) {
+            return false;
+        }
+        var verifiedPartyIds = ctx.consents().stream()
+                .filter(consent -> "VERIFIED".equals(consent.get("status")))
+                .map(consent -> ((Number) consent.get("party_id")).longValue())
+                .toList();
+        return ctx.parties().stream()
+                .filter(party -> !Boolean.TRUE.equals(party.get("deceased")))
+                .allMatch(party -> verifiedPartyIds.contains(((Number) party.get("id")).longValue()));
     }
 }

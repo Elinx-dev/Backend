@@ -37,11 +37,6 @@ public class SurveyController {
         return survey.proposeVisit(txnRef, body);
     }
 
-    @PostMapping("/visits/{visitId}/accept")
-    public Map<String, Object> accept(@PathVariable String txnRef, @PathVariable long visitId) {
-        return survey.acceptVisit(txnRef, visitId);
-    }
-
     @PostMapping("/visits/{visitId}/check-in")
     public Map<String, Object> checkIn(@PathVariable String txnRef, @PathVariable long visitId) {
         return survey.checkIn(txnRef, visitId);

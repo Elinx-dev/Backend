@@ -52,7 +52,12 @@ public class TransactionController {
         return transactions.queue(status, stage, sroCode, Math.min(limit, 500));
     }
 
-    @GetMapping("/{txnRef}")
+    @GetMapping("/surveyors")
+    public List<Map<String, Object>> surveyors() {
+        return transactions.surveyors();
+    }
+
+    @GetMapping({"/{txnRef}", "/ref/{txnRef}"})
     public Map<String, Object> detail(@PathVariable String txnRef) {
         return transactions.detail(txnRef);
     }
@@ -67,6 +72,18 @@ public class TransactionController {
     public Map<String, Object> saveParties(@PathVariable String txnRef,
                                            @Valid @RequestBody List<TransactionService.PartyInput> body) {
         return transactions.saveParties(txnRef, body);
+    }
+
+    @PutMapping("/{txnRef}/parties/{partyId}/aadhaar")
+    public Map<String, Object> savePartyAadhaar(@PathVariable String txnRef, @PathVariable long partyId,
+                                                @RequestBody TransactionService.PartyAadhaarInput body) {
+        return transactions.savePartyAadhaar(txnRef, partyId, body.aadhaarNumber());
+    }
+
+    @PutMapping("/{txnRef}/schedules")
+    public Map<String, Object> saveSchedules(@PathVariable String txnRef,
+                                             @RequestBody List<TransactionService.ScheduleInput> body) {
+        return transactions.saveSchedules(txnRef, body);
     }
 
     @PutMapping("/{txnRef}/witnesses")

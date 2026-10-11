@@ -1,5 +1,6 @@
 package in.gov.slate.revenue;
 
+import java.sql.Types;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -13,9 +14,13 @@ import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import in.gov.slate.chain.TokenService;
 import in.gov.slate.common.ApiException;
+import in.gov.slate.tahsildar.ApprovalChecklist;
+import in.gov.slate.common.AuditEvent;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
+import in.gov.slate.common.RevenueLandContext;
 import in.gov.slate.connectors.RevenueConnector;
 import in.gov.slate.connectors.model.RevenueModels.MutationPushRequest;
 import in.gov.slate.connectors.model.RevenueModels.MutationPushResponse;
@@ -37,9 +42,11 @@ public class RevenueService {
     private final RevenueConnector connector;
     private final AuditService audit;
     private final ObjectMapper mapper;
+    private final TokenService tokens;
 
     public RevenueService(NamedParameterJdbcTemplate jdbc, TransactionRepository repository, WorkflowEngine workflow,
-                          RevenueConnector connector, AuditService audit, ObjectMapper mapper) {
+                          RevenueConnector connector, AuditService audit, ObjectMapper mapper, TokenService tokens) {
+        this.tokens = tokens;
         this.jdbc = jdbc;
         this.repository = repository;
         this.workflow = workflow;
@@ -113,6 +120,7 @@ public class RevenueService {
         user.requirePermission("REVENUE_VERIFY");
         Map<String, Object> mutation = detail(mutationId);
         requireStatus(mutation, "VAO_PENDING");
+        requireVisitSlotBooked(((Number) mutation.get("transaction_id")).longValue(), user);
 
         jdbc.update("""
                 UPDATE revenue.proposed_mutation SET vao_verified_by = :userId, vao_verified_at = now(),
@@ -122,10 +130,36 @@ public class RevenueService {
                 .addValue("remarks", req.remarks()));
 
         TransactionContext ctx = repository.load((String) mutation.get("txn_ref"), user.stateCode());
-        String status = workflow.apply(ctx, "VAO_FORWARD", req.remarks(), user);
+        String status = workflow.apply(ctx, ctx.subdivisionAtRegistration() ? "VAO_FORWARD_TO_SURVEY" : "VAO_FORWARD",
+                req.remarks(), user);
+        recordChildBlocks(ctx, user, "VAO_FORWARD_TO_SURVEY", "VAO", AuditEvent.DECISION_APPROVED, "VAO_APPROVED",
+                req.remarks());
         audit.record("MUTATION_FORWARDED", "MUTATION", String.valueOf(mutationId), ctx.txnRef(), ctx.propertyRef(),
                 Map.of("status", status), null);
         return detail(mutationId);
+    }
+
+    /**
+     * A VAO may only verify a record once his own field-verification slot is booked,
+     * and only the VAO the record is assigned to may verify it.
+     */
+    private void requireVisitSlotBooked(long transactionId, CurrentUser user) {
+        var params = new MapSqlParameterSource().addValue("txnId", transactionId).addValue("userId", user.id());
+        Boolean booked = jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM survey.site_visit
+                                WHERE transaction_id = :txnId AND visit_purpose = 'FIELD_VERIFICATION'
+                                  AND status IN ('ACCEPTED','COMPLETED'))
+                """, params, Boolean.class);
+        if (!Boolean.TRUE.equals(booked)) {
+            throw ApiException.conflict("Book a site-visit slot before verifying this record");
+        }
+        Long assignedVao = jdbc.query("SELECT assigned_vao_id FROM core.transaction WHERE id = :txnId", params,
+                rs -> rs.next() ? (Long) rs.getObject(1, Long.class) : null);
+        if (assignedVao != null && assignedVao != user.id() && user.hasRole("VAO")) {
+            throw ApiException.forbidden("This record is assigned to another VAO");
+        }
+        jdbc.update("UPDATE core.transaction SET assigned_vao_id = COALESCE(assigned_vao_id, :userId) WHERE id = :txnId",
+                params);
     }
 
     @Transactional
@@ -151,6 +185,7 @@ public class RevenueService {
 
         TransactionContext ctx = repository.load((String) mutation.get("txn_ref"), user.stateCode());
         workflow.apply(ctx, "RAISE_OBJECTION", req.objectionReason(), user);
+        recordChildBlocks(ctx, user, "RAISE_OBJECTION", "VAO", null, "OBJECTION_PENDING", req.objectionReason());
         audit.record("OBJECTION_RAISED", "MUTATION", String.valueOf(mutationId), ctx.txnRef(), ctx.propertyRef(),
                 Map.of("objector", String.valueOf(req.objectorName())), null);
         return detail(mutationId);
@@ -173,8 +208,16 @@ public class RevenueService {
 
         TransactionContext ctx = repository.load((String) mutation.get("txn_ref"), user.stateCode());
         workflow.apply(ctx, "DISPOSE_OBJECTION", req.remarks() != null ? req.remarks() : req.disposalDecision(), user);
-        audit.record("OBJECTION_DISPOSED", "MUTATION", String.valueOf(mutationId), ctx.txnRef(), ctx.propertyRef(),
-                Map.of("decision", String.valueOf(req.disposalDecision())), null);
+        recordChildBlocks(ctx, user, "DISPOSE_OBJECTION", "VAO", disposalDecision(req.disposalDecision()),
+                "VAO_PENDING", req.remarks() != null ? req.remarks() : req.disposalDecision());
+        audit.record(AuditEvent.of("OBJECTION_DISPOSED")
+                .category(AuditEvent.CATEGORY_APPROVAL)
+                .entity("MUTATION", String.valueOf(mutationId))
+                .transactionRef(ctx.txnRef())
+                .propertyRef(ctx.propertyRef())
+                .decision(disposalDecision(req.disposalDecision()))
+                .after(Map.of("decision", String.valueOf(req.disposalDecision())))
+                .detail(req.remarks()));
         return detail(mutationId);
     }
 
@@ -184,7 +227,7 @@ public class RevenueService {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("REVENUE_APPROVE");
         Map<String, Object> mutation = detail(mutationId);
-        requireStatus(mutation, "TAHSILDAR_PENDING");
+        requireApprovalReady(mutationId);
 
         TransactionContext ctx = repository.load((String) mutation.get("txn_ref"), user.stateCode());
         MutationPushResponse pushed = connector.pushMutation(new MutationPushRequest(
@@ -213,7 +256,7 @@ public class RevenueService {
                 INSERT INTO revenue.current_state (property_id, revenue_record_ref, revenue_survey_no,
                     revenue_subdivision_no, land_context, owners, extent_value, extent_unit, classification,
                     record_status, source_reference)
-                SELECT p.id, :recordNumber, p.survey_no, p.subdivision_no, p.land_type_code,
+                SELECT p.id, :recordNumber, p.survey_no, p.subdivision_no, :landContext,
                        m.proposed_owner_set, p.extent_value, p.extent_unit, p.classification_code, 'ACTIVE',
                        :sourceRef
                   FROM revenue.proposed_mutation m JOIN core.property p ON p.id = m.property_id
@@ -221,12 +264,70 @@ public class RevenueService {
                 """, new MapSqlParameterSource()
                 .addValue("id", mutationId)
                 .addValue("recordNumber", pushed.revenueRecordRef())
+                .addValue("landContext", RevenueLandContext.forLegacySnapshot(
+                        ctx.property().get("land_type_code")), Types.VARCHAR)
                 .addValue("sourceRef", pushed.mutationNumber()));
 
         String status = workflow.apply(ctx, "TAHSILDAR_APPROVE", req.remarks(), user);
-        audit.record("MUTATION_APPROVED", "MUTATION", String.valueOf(mutationId), ctx.txnRef(), ctx.propertyRef(),
-                Map.of("status", status, "revenueRecordRef", pushed.revenueRecordRef()), null);
+        recordChildBlocks(ctx, user, "TAHSILDAR_APPROVE", "TAHSILDAR", AuditEvent.DECISION_APPROVED,
+                "TAHSILDAR_APPROVED", req.remarks());
+        audit.record(AuditEvent.of("MUTATION_APPROVED")
+                .category(AuditEvent.CATEGORY_APPROVAL)
+                .entity("MUTATION", String.valueOf(mutationId))
+                .transactionRef(ctx.txnRef())
+                .propertyRef(ctx.propertyRef())
+                .decision(AuditEvent.DECISION_APPROVED)
+                .statusChange("TAHSILDAR_PENDING", status)
+                .after(Map.of("status", status, "revenueRecordRef", pushed.revenueRecordRef()))
+                .detail(req.remarks()));
         return detail(mutationId);
+    }
+
+    /** Subdivision at Register: the officer action becomes a new block on each child token. */
+    private void recordChildBlocks(TransactionContext ctx, CurrentUser user, String action, String role,
+                                   String decision, String approvalStatus, String remarks) {
+        if (ctx.subdivisionAtRegistration()) {
+            tokens.annotateChildren((String) ctx.transaction().get("state_code"), ctx.id(),
+                    new TokenService.ChainEvent(action, role, user.id(), decision, approvalStatus, remarks));
+        }
+    }
+
+    /** Maps the free-text objection disposal onto the audited approval decision. */
+    private String disposalDecision(String value) {
+        if (value == null) {
+            return null;
+        }
+        String upper = value.toUpperCase();
+        if (upper.contains("REJECT") || upper.contains("DISMISS")) {
+            return AuditEvent.DECISION_REJECTED;
+        }
+        if (upper.contains("ACCEPT") || upper.contains("ALLOW") || upper.contains("UPHELD")) {
+            return AuditEvent.DECISION_APPROVED;
+        }
+        return null;
+    }
+
+    /** Locks the mutation so a second, concurrent approval sees it already approved. */
+    private void requireApprovalReady(long mutationId) {
+        var rows = jdbc.queryForList("SELECT " + ApprovalChecklist.READINESS_COLUMNS + """
+                  FROM revenue.proposed_mutation m
+                  JOIN core.transaction t ON t.id = m.transaction_id
+                """ + ApprovalChecklist.READINESS_JOINS + """
+                 WHERE m.id = :id
+                   FOR UPDATE OF m
+                """, new MapSqlParameterSource("id", mutationId));
+        if (rows.isEmpty()) {
+            throw ApiException.notFound("Mutation " + mutationId);
+        }
+        Map<String, Object> readiness = rows.get(0);
+        if (!"TAHSILDAR_PENDING".equals(readiness.get("mutation_status"))) {
+            throw ApiException.conflict("Mutation is " + readiness.get("mutation_status")
+                    + "; only TAHSILDAR_PENDING mutations can be approved");
+        }
+        List<String> failed = ApprovalChecklist.failed(ApprovalChecklist.evaluate(readiness));
+        if (!failed.isEmpty()) {
+            throw ApiException.conflict("Cannot approve yet: " + String.join(", ", failed));
+        }
     }
 
     private String registeredDocumentNo(long transactionId) {
