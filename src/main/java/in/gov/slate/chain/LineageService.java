@@ -50,6 +50,9 @@ public class LineageService {
                    t.token_ref, t.status AS token_status, t.approval_status, t.state_version,
                    pt.token_ref AS parent_token_ref, mint_tx.txn_ref AS created_by_txn_ref,
                    (SELECT count(*) FROM chain.token_state_history h WHERE h.token_id = t.id) AS block_count,
+                   t.state_code AS token_state_code,
+                   (SELECT '0x' || encode(h.state_hash, 'hex') FROM chain.token_state_history h
+                     WHERE h.token_id = t.id ORDER BY h.state_version DESC LIMIT 1) AS latest_state_hash,
                    anchor.status AS anchor_status, anchor.tx_hash AS anchor_tx_hash,
                    anchor.block_number AS anchor_block_number, anchor.error_message AS anchor_note,
                    (SELECT string_agg(o.owner_name, ', ' ORDER BY o.id) FROM core.property_owner o
@@ -83,6 +86,35 @@ public class LineageService {
         this.audit = audit;
         this.chainEnabled = chainEnabled;
         this.submitterConfigured = submitterKey != null && !submitterKey.isBlank();
+    }
+
+    private ChainService chain;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setChain(ChainService chain) {
+        this.chain = chain;
+    }
+
+    /** Reads each node's latest state hash back from the contract; null when no chain is connected. */
+    private boolean readBack(List<Map<String, Object>> nodes) {
+        boolean anyRead = false;
+        for (Map<String, Object> n : nodes) {
+            Object hash = n.get("latest_state_hash");
+            Boolean onChain = chain == null || n.get("token_ref") == null || hash == null ? null
+                    : chain.hasState((String) n.get("token_state_code"), (String) n.get("token_ref"), (String) hash);
+            String status;
+            if (onChain == null) {
+                status = "NOT_CONNECTED";
+            } else if (onChain) {
+                status = "VERIFIED";
+                anyRead = true;
+            } else {
+                status = "MINED".equals(n.get("anchor_status")) ? "MISMATCH" : "NOT_ANCHORED";
+                anyRead = true;
+            }
+            n.put("onchain_status", status);
+        }
+        return anyRead;
     }
 
     public Map<String, Object> lineage(String tokenRef, String propertyRef, Long propertyId) {
@@ -132,7 +164,15 @@ public class LineageService {
         out.put("ancestors", nodes.stream().filter(n -> "ANCESTOR".equals(n.get("relation"))).toList());
         out.put("descendants", nodes.stream().filter(n -> "DESCENDANT".equals(n.get("relation"))).toList());
         out.put("nodes", nodes);
-        out.put("chain", chainStatus(nodes));
+        boolean read = readBack(nodes);
+        Map<String, Object> chainInfo = chainStatus(nodes);
+        if (read) {
+            chainInfo.put("connected", true);
+            chainInfo.put("source", "BLOCKCHAIN_READ_BACK");
+            chainInfo.put("note", "Each token's latest state hash was checked against the PROPERTY_TOKEN contract; "
+                    + "see onchain_status on every node.");
+        }
+        out.put("chain", chainInfo);
 
         audit.record("LINEAGE_VIEWED", "PROPERTY", String.valueOf(id), null, (String) property.get("property_ref"),
                 Map.of("lookupBy", lookupBy, "nodeCount", nodes.size()), null);

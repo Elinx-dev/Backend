@@ -77,8 +77,8 @@ public class PublicController {
     }
 
     /** Certificate QR target: checks the registered deed and the property token against the chain. No personal data. */
-    @GetMapping("/verify/{documentNo}")
-    public Map<String, Object> verifyCertificate(@PathVariable String documentNo) {
+    @GetMapping("/verify")
+    public Map<String, Object> verifyCertificate(@RequestParam String documentNo) {
         if (!documentNo.matches("[A-Za-z0-9/_-]{1,64}")) {
             throw ApiException.badRequest("Invalid document number");
         }
