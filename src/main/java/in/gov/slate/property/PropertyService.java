@@ -779,7 +779,7 @@ public class PropertyService {
                         OR coalesce(p.door_no,'') ILIKE '%'||:query||'%')
                    AND (CAST(:villageCode AS text) IS NULL OR p.village_code = :villageCode)
                    AND (CAST(:surveyNo AS text) IS NULL OR p.survey_no = :surveyNo)
-                 ORDER BY latest_registration.registered_at DESC NULLS LAST, p.property_ref
+                 ORDER BY GREATEST(p.created_at, latest_registration.registered_at) DESC, p.id DESC
                  LIMIT :limit
                 """, new MapSqlParameterSource()
                 .addValue("stateCode", user.stateCode())
