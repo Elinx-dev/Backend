@@ -105,7 +105,8 @@ def run_flow(h, s):
         {"side": "SIDE_1", "propertyOwnerId": owner_id},
         {"side": "SIDE_2", "ownerTypeCode": "INDIVIDUAL", "name": s["buyer"], "aadhaarNumber": aadhaar(),
          "pan": "PQRSX6789K", "mobile": "97" + str(random.randint(10000000, 99999999)),
-         "address": "7 Lake View Road, Velachery, Chennai"}], "save parties")
+         "address": "7 Lake View Road, Velachery, Chennai", "extentTransferred": 1000 if sub else None}],
+        "save parties")
     call(h, "PUT", f"/api/transactions/{x}/witnesses", [
         {"name": "Witness One", "address": "Karapakkam", "idProofType": "AADHAAR", "idProofRef": aadhaar()},
         {"name": "Witness Two", "address": "Sholinganallur", "idProofType": "AADHAAR", "idProofRef": aadhaar()}],
