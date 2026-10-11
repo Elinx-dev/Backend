@@ -61,6 +61,13 @@ public class TransactionService {
         this.aadhaarSaltRef = aadhaarSaltRef;
     }
 
+    private in.gov.slate.common.PiiCrypto pii = new in.gov.slate.common.PiiCrypto("", "v1", "");
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void setPiiCrypto(in.gov.slate.common.PiiCrypto pii) {
+        this.pii = pii;
+    }
+
     public record CreateRequest(@NotBlank String propertyRef, @NotBlank String deedTypeCode,
                                 String subtype, String transferScope, String sroCode, String remarks,
                                 BigDecimal declaredConsideration, String modeOfConsideration,
@@ -300,7 +307,7 @@ public class TransactionService {
         if (!ctx.consents().isEmpty()) {
             throw ApiException.conflict("Parties cannot be replaced after consent has been requested");
         }
-        List<PartyInput> resolved = resolveParties(ctx, parties);
+        List<PartyInput> resolved = restoreMaskedValues(ctx, resolveParties(ctx, parties));
         TransactionTypeRules.validateParties(ctx.deedType(), resolved,
                 code -> config.isActiveBloodRelation(user.stateCode(), code));
         validateEnteredParties(user.stateCode(), ctx.deedType(), resolved);
@@ -348,16 +355,16 @@ public class TransactionService {
                     .addValue("saltRef", aadhaar == null ? null : aadhaarSaltRef)
                     .addValue("kartaName", huf ? rep.name() : p.kartaName())
                     .addValue("kartaHash", hashAadhaar(huf ? repAadhaar : p.kartaAadhaarNumber()))
-                    .addValue("pan", p.pan())
-                    .addValue("mobile", form != null && !form.ownerMobile() ? null : p.mobile())
-                    .addValue("address", p.address())
+                    .addValue("pan", pii.protect(p.pan()))
+                    .addValue("mobile", pii.protect(form != null && !form.ownerMobile() ? null : p.mobile()))
+                    .addValue("address", pii.protect(p.address()))
                     .addValue("registrationNo", form != null && form.registrationNo() ? p.registrationNo() : null)
                     .addValue("repRole", rep == null ? null : form.representativeRole())
                     .addValue("repName", rep == null ? null : rep.name())
                     .addValue("repDesignation", rep == null || !form.representativeDesignation() ? null : rep.designation())
                     .addValue("repLast4", last4(repAadhaar))
-                    .addValue("repPan", rep == null ? null : rep.pan())
-                    .addValue("repMobile", rep == null || !form.representativeMobile() ? null : rep.mobile())
+                    .addValue("repPan", pii.protect(rep == null ? null : rep.pan()))
+                    .addValue("repMobile", pii.protect(rep == null || !form.representativeMobile() ? null : rep.mobile()))
                     .addValue("relationshipCode", p.relationshipCode())
                     .addValue("extentTransferred", p.extentTransferred())
                     .addValue("authorityRef", p.authorityPoaReference())
@@ -376,14 +383,14 @@ public class TransactionService {
      * referenced by propertyOwnerId); second-party rows are taken as entered.
      */
     private List<PartyInput> resolveParties(TransactionContext ctx, List<PartyInput> parties) {
-        List<Map<String, Object>> owners = jdbc.queryForList("""
+        List<Map<String, Object>> owners = pii.revealRows(jdbc.queryForList("""
                 SELECT id, owner_type_code, owner_name, aadhaar_number, pan, mobile, address, registration_no,
                        representative_name, representative_designation, representative_aadhaar,
                        representative_pan, representative_mobile
                   FROM core.property_owner
                  WHERE property_id = :propertyId AND effective_to IS NULL
                  ORDER BY id
-                """, new MapSqlParameterSource("propertyId", ctx.transaction().get("property_id")));
+                """, new MapSqlParameterSource("propertyId", ctx.transaction().get("property_id"))));
         java.util.Set<Long> selected = parties.stream()
                 .filter(p -> "SIDE_1".equals(p.side()) && p.propertyOwnerId() != null)
                 .map(PartyInput::propertyOwnerId)
@@ -418,6 +425,39 @@ public class TransactionService {
                         p.authorityPoaReference(), null))
                 .forEach(out::add);
         return out;
+    }
+
+    /**
+     * Saved parties come back to the screen with PAN and mobile masked. When a party is saved
+     * again unchanged, the masked value is swapped back for the stored one of the same party.
+     */
+    private List<PartyInput> restoreMaskedValues(TransactionContext ctx, List<PartyInput> parties) {
+        List<PartyInput> out = new java.util.ArrayList<>();
+        for (PartyInput p : parties) {
+            Map<String, Object> existing = "SIDE_1".equals(p.side()) || p.name() == null ? null
+                    : ctx.side(p.side()).stream()
+                            .filter(e -> p.name().trim().equalsIgnoreCase(String.valueOf(e.get("name")).trim()))
+                            .findFirst().orElse(null);
+            if (existing == null) {
+                out.add(p);
+                continue;
+            }
+            PropertyService.RepresentativeInput rep = p.representative() == null ? null
+                    : new PropertyService.RepresentativeInput(p.representative().name(),
+                            p.representative().designation(), p.representative().aadhaarNumber(),
+                            unmask("representative_pan", p.representative().pan(), existing),
+                            unmask("representative_mobile", p.representative().mobile(), existing));
+            out.add(new PartyInput(p.side(), p.role(), p.partyType(), p.ownerTypeCode(), p.name(), p.aadhaarNumber(),
+                    p.kartaName(), p.kartaAadhaarNumber(), unmask("pan", p.pan(), existing),
+                    unmask("mobile", p.mobile(), existing), p.address(), p.registrationNo(), rep,
+                    p.relationshipCode(), p.extentTransferred(), p.authorityPoaReference(), p.propertyOwnerId()));
+        }
+        return out;
+    }
+
+    private static String unmask(String field, String input, Map<String, Object> existing) {
+        String stored = (String) existing.get(field);
+        return in.gov.slate.common.PiiCrypto.isMaskOf(field, input, stored) ? stored : input;
     }
 
     private static String ownerPartyType(String ownerTypeCode) {
@@ -519,9 +559,9 @@ public class TransactionService {
             if (owners.isEmpty()) {
                 continue;
             }
-            String aadhaar = twelveDigits((String) owners.get(0).get("aadhaar_number"));
+            String aadhaar = twelveDigits(pii.reveal((String) owners.get(0).get("aadhaar_number")));
             if (aadhaar == null) {
-                aadhaar = twelveDigits((String) owners.get(0).get("representative_aadhaar"));
+                aadhaar = twelveDigits(pii.reveal((String) owners.get(0).get("representative_aadhaar")));
             }
             if (aadhaar != null) {
                 storePartyAadhaar(ctx.id(), ((Number) party.get("id")).longValue(), aadhaar);
@@ -564,7 +604,7 @@ public class TransactionService {
                     .addValue("txnId", ctx.id())
                     .addValue("seq", seq)
                     .addValue("name", w.name())
-                    .addValue("address", w.address())
+                    .addValue("address", pii.protect(w.address()))
                     .addValue("type", w.idProofType())
                     .addValue("ref", w.idProofRef()));
         }

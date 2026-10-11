@@ -57,6 +57,13 @@ public class RegistrationService {
         this.mapper = mapper;
     }
 
+    private in.gov.slate.common.PiiCrypto pii = new in.gov.slate.common.PiiCrypto("", "v1", "");
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void setPiiCrypto(in.gov.slate.common.PiiCrypto pii) {
+        this.pii = pii;
+    }
+
     @Transactional
     public Map<String, Object> register(String txnRef) {
         CurrentUser user = CurrentUser.require();
@@ -334,17 +341,17 @@ public class RegistrationService {
                     .addValue("txnId", ctx.id())
                     .addValue("today", effectiveFrom)
                     .addValue("ownerType", d.get("owner_type_code"))
-                    .addValue("aadhaar", d.get("aadhaar_number"))
-                    .addValue("pan", d.get("pan"))
-                    .addValue("mobile", d.get("mobile"))
-                    .addValue("address", d.get("address"))
+                    .addValue("aadhaar", pii.protect(d.get("aadhaar_number")))
+                    .addValue("pan", pii.protect(d.get("pan")))
+                    .addValue("mobile", pii.protect(d.get("mobile")))
+                    .addValue("address", pii.protect(d.get("address")))
                     .addValue("registrationNo", d.get("registration_no"))
                     .addValue("repRole", d.get("representative_role"))
                     .addValue("repName", d.get("representative_name"))
                     .addValue("repDesignation", d.get("representative_designation"))
-                    .addValue("repAadhaar", d.get("representative_aadhaar"))
-                    .addValue("repPan", d.get("representative_pan"))
-                    .addValue("repMobile", d.get("representative_mobile")));
+                    .addValue("repAadhaar", pii.protect(d.get("representative_aadhaar")))
+                    .addValue("repPan", pii.protect(d.get("representative_pan")))
+                    .addValue("repMobile", pii.protect(d.get("representative_mobile"))));
         }
         ctx.side("SIDE_2").stream()
                 .map(party -> (String) party.get("owner_type_code"))

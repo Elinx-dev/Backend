@@ -39,8 +39,12 @@ public class PartitionService {
     private final TransactionService transactions;
     private final AuditService audit;
 
+    private final in.gov.slate.common.PiiCrypto pii;
+
     public PartitionService(NamedParameterJdbcTemplate jdbc, TransactionRepository repository,
-                            TransactionService transactions, AuditService audit) {
+                            TransactionService transactions, AuditService audit,
+                            in.gov.slate.common.PiiCrypto pii) {
+        this.pii = pii;
         this.jdbc = jdbc;
         this.repository = repository;
         this.transactions = transactions;
@@ -122,7 +126,7 @@ public class PartitionService {
     }
 
     private List<Map<String, Object>> members(long txnId) {
-        return jdbc.queryForList("""
+        return pii.revealRows(jdbc.queryForList("""
                 SELECT m.id, m.seq, m.member_ref, m.parent_member_id, m.member_type, m.property_owner_id,
                        m.party_id, m.name, m.relationship, m.living_status, m.marital_status, m.date_of_death,
                        m.death_cert_no, m.death_cert_date, m.death_cert_document_id, m.legal_heir_cert_available,
@@ -134,7 +138,7 @@ public class PartitionService {
                   LEFT JOIN core.document ld ON ld.id = m.legal_heir_document_id
                   LEFT JOIN core.transaction_party p ON p.id = m.party_id
                  WHERE m.transaction_id = :txnId ORDER BY m.seq
-                """, new MapSqlParameterSource("txnId", txnId));
+                """, new MapSqlParameterSource("txnId", txnId)));
     }
 
     /** Living current owners and living heirs at the end of each branch, with their lineage. */
