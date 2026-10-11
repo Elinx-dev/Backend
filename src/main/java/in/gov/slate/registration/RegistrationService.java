@@ -95,12 +95,19 @@ public class RegistrationService {
         String newStatus = workflow.apply(ctx, "REGISTER", null, user);
 
         long propertyId = ((Number) ctx.property().get("id")).longValue();
-        applyRegisteredOwnership(ctx, propertyId, resultingOwners, today);
-
-        byte[] evidenceRoot = Hashes.merkleRoot(List.of(deedHash, TokenService.ownerSetHash(resultingOwners),
-                Hashes.sha256(txnRef)));
-        Map<String, Object> token = tokens.mintOrUpdate((String) ctx.transaction().get("state_code"), propertyId,
-                ctx.propertyRef(), ctx.id(), resultingOwners, evidenceRoot);
+        Map<String, Object> token;
+        List<Map<String, Object>> newProperties = List.of();
+        if (ctx.subdivisionAtRegistration()) {
+            List<Map<String, Object>> minted = createSubdivisionProperties(ctx, today);
+            token = minted.get(0);
+            newProperties = childProperties(ctx.id());
+        } else {
+            applyRegisteredOwnership(ctx, propertyId, resultingOwners, today);
+            byte[] evidenceRoot = Hashes.merkleRoot(List.of(deedHash, TokenService.ownerSetHash(resultingOwners),
+                    Hashes.sha256(txnRef)));
+            token = tokens.mintOrUpdate((String) ctx.transaction().get("state_code"), propertyId,
+                    ctx.propertyRef(), ctx.id(), resultingOwners, evidenceRoot);
+        }
 
         audit.record("REGISTERED", "TRANSACTION", String.valueOf(ctx.id()), txnRef, ctx.propertyRef(),
                 Map.of("documentNo", documentNo, "token", String.valueOf(token.get("token_ref"))), null);
@@ -117,8 +124,98 @@ public class RegistrationService {
         out.put("deedSha256", Hashes.hex(deedHash));
         out.put("token", token);
         out.put("registeredOwners", resultingOwners);
+        out.put("newProperties", newProperties);
         return out;
     }
+
+    /**
+     * Subdivision at Register: the property is split into two new properties linked to this one transaction.
+     * Property 1 goes to the buyers (second party) with the transferred extent, property 2 to the sellers with
+     * the rest. Both copy the parent's survey number, subdivision and details; the Surveyor corrects them later.
+     * The parent becomes INACTIVE and its owners are closed by {@link TokenService#split}.
+     */
+    private List<Map<String, Object>> createSubdivisionProperties(TransactionContext ctx, LocalDate today) {
+        if (!"ACTIVE".equals(ctx.property().get("status"))) {
+            throw ApiException.conflict("Property " + ctx.propertyRef() + " is inactive; it cannot be subdivided");
+        }
+        String stateCode = (String) ctx.transaction().get("state_code");
+        long parentId = ((Number) ctx.property().get("id")).longValue();
+        BigDecimal parentExtent = decimal(ctx.property().get("extent_value"));
+        BigDecimal buyerExtent = ctx.side("SIDE_2").stream()
+                .map(party -> decimal(party.get("extent_transferred")))
+                .filter(java.util.Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal sellerExtent;
+        if (parentExtent != null && buyerExtent.signum() > 0 && buyerExtent.compareTo(parentExtent) < 0) {
+            sellerExtent = parentExtent.subtract(buyerExtent);
+        } else {
+            buyerExtent = parentExtent;
+            sellerExtent = parentExtent;
+        }
+
+        List<TokenService.ChildParcel> children = new ArrayList<>();
+        int seq = 1;
+        for (String side : List.of("SIDE_2", "SIDE_1")) {
+            List<TokenService.Owner> owners = ctx.side(side).stream()
+                    .map(party -> new TokenService.Owner((String) party.get("name"), null))
+                    .toList();
+            if (owners.isEmpty()) {
+                throw ApiException.conflict("Subdivision needs at least one " + ("SIDE_2".equals(side) ? "buyer" : "seller"));
+            }
+            String childRef = numbering.next(stateCode, "PROPERTY_REF", (String) ctx.property().get("district_code"));
+            var keyHolder = new GeneratedKeyHolder();
+            jdbc.update("""
+                    INSERT INTO core.property (state_code, property_ref, property_type_code, nature_of_title_code,
+                        land_type_code, classification_code, extent_value, extent_unit, survey_no, subdivision_no,
+                        old_survey_reference, district_code, taluk_code, village_code, sro_code, street, door_no,
+                        guideline_value, guideline_value_reference, parent_property_id, created_by,
+                        boundary_north, boundary_south, boundary_east, boundary_west)
+                    SELECT p.state_code, :childRef, p.property_type_code, p.nature_of_title_code, p.land_type_code,
+                           p.classification_code, :extent, p.extent_unit, p.survey_no, p.subdivision_no,
+                           concat_ws('/', p.survey_no, NULLIF(p.subdivision_no, '')), p.district_code,
+                           p.taluk_code, p.village_code, p.sro_code, p.street, p.door_no, p.guideline_value,
+                           p.guideline_value_reference, p.id, :userId,
+                           p.boundary_north, p.boundary_south, p.boundary_east, p.boundary_west
+                      FROM core.property p WHERE p.id = :parentId
+                    """, new MapSqlParameterSource()
+                    .addValue("childRef", childRef)
+                    .addValue("extent", "SIDE_2".equals(side) ? buyerExtent : sellerExtent)
+                    .addValue("parentId", parentId)
+                    .addValue("userId", CurrentUser.require().id()), keyHolder, new String[]{"id"});
+            long childId = keyHolder.getKey().longValue();
+            jdbc.update("""
+                    INSERT INTO core.property_survey (property_id, seq, survey_no, subdivision_no, extent_value,
+                        extent_unit)
+                    SELECT id, 1, survey_no, subdivision_no, extent_value, extent_unit FROM core.property WHERE id = :id
+                    """, new MapSqlParameterSource("id", childId));
+            jdbc.update("""
+                    INSERT INTO core.transaction_property (transaction_id, property_id, seq, allotted_side)
+                    VALUES (:txnId, :propertyId, :seq, :side)
+                    """, new MapSqlParameterSource().addValue("txnId", ctx.id()).addValue("propertyId", childId)
+                    .addValue("seq", seq++).addValue("side", side));
+            applyRegisteredOwnership(ctx, childId, owners, today);
+            children.add(new TokenService.ChildParcel(childRef, childId, owners));
+        }
+        return tokens.split(stateCode, parentId, ctx.id(), children);
+    }
+
+    /** The new properties a subdivision transaction created at Register, with their current owners. */
+    public List<Map<String, Object>> childProperties(long transactionId) {
+        return jdbc.queryForList(CHILD_PROPERTIES_SQL, new MapSqlParameterSource("txnId", transactionId));
+    }
+
+    public static final String CHILD_PROPERTIES_SQL = """
+            SELECT tp.seq, tp.allotted_side, p.property_ref, p.status, p.survey_no, p.subdivision_no,
+                   p.extent_value, p.extent_unit, p.boundary_north, p.boundary_south, p.boundary_east,
+                   p.boundary_west, t.token_ref,
+                   (SELECT string_agg(o.owner_name, ', ' ORDER BY o.id) FROM core.property_owner o
+                     WHERE o.property_id = p.id AND o.effective_to IS NULL) AS owners
+              FROM core.transaction_property tp
+              JOIN core.property p ON p.id = tp.property_id
+              LEFT JOIN chain.token t ON t.id = p.token_id
+             WHERE tp.transaction_id = :txnId
+             ORDER BY tp.seq
+            """;
 
     /**
      * After registration the transaction either goes to survey (physical partial
@@ -126,6 +223,10 @@ public class RegistrationService {
      */
     private String handOff(TransactionContext ctx, long registrationId, List<TokenService.Owner> owners,
                            CurrentUser user) {
+        if (ctx.subdivisionAtRegistration()) {
+            createProposedMutation(ctx, registrationId, owners, null);
+            return workflow.apply(ctx, "PROPOSE_SUBDIVISION", null, user);
+        }
         if (ctx.surveyRequired()) {
             return workflow.apply(ctx, "START_SURVEY", null, user);
         }

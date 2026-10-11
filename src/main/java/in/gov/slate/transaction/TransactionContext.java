@@ -42,6 +42,11 @@ public record TransactionContext(
         return Boolean.TRUE.equals(transaction.get("survey_required"));
     }
 
+    /** Subdivision Required = Yes on a non-Partition deed: Register creates the new properties. */
+    public boolean subdivisionAtRegistration() {
+        return Boolean.TRUE.equals(transaction().get("subdivision_required")) && !"PARTITION".equals(deedTypeCode());
+    }
+
     public String propertyRef() {
         return (String) property.get("property_ref");
     }

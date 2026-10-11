@@ -127,7 +127,8 @@ public class RevenueService {
                 .addValue("remarks", req.remarks()));
 
         TransactionContext ctx = repository.load((String) mutation.get("txn_ref"), user.stateCode());
-        String status = workflow.apply(ctx, "VAO_FORWARD", req.remarks(), user);
+        String status = workflow.apply(ctx, ctx.subdivisionAtRegistration() ? "VAO_FORWARD_TO_SURVEY" : "VAO_FORWARD",
+                req.remarks(), user);
         audit.record("MUTATION_FORWARDED", "MUTATION", String.valueOf(mutationId), ctx.txnRef(), ctx.propertyRef(),
                 Map.of("status", status), null);
         return detail(mutationId);

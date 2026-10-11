@@ -143,6 +143,8 @@ public class SurveyorService {
         Map<String, Object> out = new LinkedHashMap<>(row);
         out.put("property", ctx.property());
         out.put("parties", ctx.parties());
+        out.put("childProperties", jdbc.queryForList(in.gov.slate.registration.RegistrationService.CHILD_PROPERTIES_SQL,
+                new MapSqlParameterSource("txnId", ctx.id())));
         out.put("visits", jdbc.queryForList("""
                 SELECT v.*, %s AS agreed_date, %s AS agreed_time, pu.full_name AS proposed_by_name
                   FROM survey.site_visit v

@@ -211,10 +211,12 @@ public class ValidationEngine {
         predicates.put("ruleChecksPassed", ctx ->
                 !ctx.ruleResults().isEmpty() && blockingRuleResults(ctx).isEmpty());
         predicates.put("rulesAreAdvisory", ctx -> !config.rulesAreBlocking());
-        predicates.put("surveyRequired", TransactionContext::surveyRequired);
+        // A subdivision created at Register follows its own path: Register -> VAO -> Surveyor -> Tahsildar.
+        predicates.put("subdivisionRequired", TransactionContext::subdivisionAtRegistration);
+        predicates.put("surveyRequired", ctx -> ctx.surveyRequired() && !ctx.subdivisionAtRegistration());
         predicates.put("surveyNotRequired", ctx -> !ctx.surveyRequired());
-        predicates.put("surveyWithinTolerance", ctx -> true);
-        predicates.put("mutationVerified", ctx -> true);
+        predicates.put("surveyWithinTolerance", ctx -> !ctx.subdivisionAtRegistration());
+        predicates.put("mutationVerified", ctx -> !ctx.subdivisionAtRegistration());
         predicates.put("readyToRegister", ctx ->
                 predicates.get("allPartiesConsentVerified").test(ctx)
                         && predicates.get("feesFullyPaid").test(ctx)
