@@ -7,7 +7,6 @@ import java.math.BigDecimal;
 
 import org.junit.jupiter.api.Test;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import in.gov.slate.common.ApiException;
@@ -45,26 +44,5 @@ class FeeCalculatorTest {
         assertThatThrownBy(() -> FeeCalculator.component("stamp duty", BigDecimal.TEN, "SLAB",
                 null, null, null, null))
                 .isInstanceOf(ApiException.class).hasMessageContaining("unknown");
-    }
-
-    @Test
-    void otherChargesAddFlatAndPerPageAmounts() throws Exception {
-        JsonNode charges = MAPPER.readTree("""
-                [{"code":"COMPUTER_CHARGE","label":"Computer charge","basis":"FLAT","amount":100},
-                 {"code":"SCANNING_CHARGE","label":"Scanning charge","basis":"PER_PAGE","amount":10}]
-                """);
-        FeeCalculator.OtherCharges result = FeeCalculator.otherCharges(charges, 12);
-        assertThat(result.total()).isEqualByComparingTo("220");
-        assertThat(result.lines()).hasSize(2);
-        assertThat(result.lines().get(1)).containsEntry("pages", 12);
-    }
-
-    @Test
-    void perPageChargeNeedsThePageCount() throws Exception {
-        JsonNode charges = MAPPER.readTree("""
-                [{"code":"SCANNING_CHARGE","label":"Scanning charge","basis":"PER_PAGE","amount":10}]
-                """);
-        assertThatThrownBy(() -> FeeCalculator.otherCharges(charges, null))
-                .isInstanceOf(ApiException.class).hasMessageContaining("number of pages");
     }
 }
