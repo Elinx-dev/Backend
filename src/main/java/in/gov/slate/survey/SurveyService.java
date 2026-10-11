@@ -257,6 +257,9 @@ public class SurveyService {
         if (withinTolerance && !children.isEmpty()) {
             TransactionContext reloaded = repository.load(txnRef, user.stateCode());
             out.put("status", workflow.apply(reloaded, "SUBMIT_SUBDIVISION_SURVEY", null, user));
+            tokens.annotateChildren((String) ctx.transaction().get("state_code"), ctx.id(),
+                    new TokenService.ChainEvent("SUBMIT_SUBDIVISION_SURVEY", "SURVEYOR", user.id(), "APPROVED",
+                            "SURVEY_APPROVED", req.siteNotes()));
         } else if (withinTolerance) {
             TransactionContext reloaded = repository.load(txnRef, user.stateCode());
             long registrationId = jdbc.queryForObject(

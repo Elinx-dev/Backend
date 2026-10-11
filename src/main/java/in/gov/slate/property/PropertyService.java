@@ -688,7 +688,8 @@ public class PropertyService {
     private List<Map<String, Object>> propertyRelations(long propertyId) {
         return jdbc.queryForList("""
                 SELECT relation_type, property_ref, property_status, survey_no, subdivision_no,
-                       extent_value, extent_unit, token_ref, token_status, token_state_version,
+                       extent_value, extent_unit, token_ref, token_status, token_approval_status,
+                       token_state_version,
                        parent_token_ref, token_lineage_status, lineage_transaction_ref, parcel_sequence,
                        official_subdivision_no
                   FROM (
@@ -696,6 +697,7 @@ public class PropertyService {
                                parent.status AS property_status, parent.survey_no, parent.subdivision_no,
                                parent.extent_value, parent.extent_unit, parent_token.token_ref,
                                parent_token.status AS token_status,
+                               parent_token.approval_status AS token_approval_status,
                                parent_token.state_version AS token_state_version,
                                parent_token.token_ref AS parent_token_ref,
                                CASE WHEN property_token.parent_token_id = parent_token.id
@@ -718,6 +720,7 @@ public class PropertyService {
                                child.status AS property_status, child.survey_no, child.subdivision_no,
                                child.extent_value, child.extent_unit, child_token.token_ref,
                                child_token.status AS token_status,
+                               child_token.approval_status AS token_approval_status,
                                child_token.state_version AS token_state_version,
                                COALESCE(linked_parent_token.token_ref,
                                         property_parent_token.token_ref) AS parent_token_ref,

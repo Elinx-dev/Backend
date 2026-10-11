@@ -697,6 +697,8 @@ public class TransactionService {
         out.put("parties", ctx.parties());
         out.put("childProperties", jdbc.queryForList(in.gov.slate.registration.RegistrationService.CHILD_PROPERTIES_SQL,
                 new MapSqlParameterSource("txnId", ctx.id())));
+        out.put("tokenBlocks", jdbc.queryForList(in.gov.slate.chain.TokenService.TRANSACTION_BLOCKS_SQL,
+                new MapSqlParameterSource("txnId", ctx.id())));
         out.put("witnesses", ctx.witnesses());
         out.put("consents", ctx.consents());
         String stateCode = (String) ctx.transaction().get("state_code");

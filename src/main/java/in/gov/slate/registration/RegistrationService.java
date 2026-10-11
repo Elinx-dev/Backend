@@ -196,7 +196,10 @@ public class RegistrationService {
             applyRegisteredOwnership(ctx, childId, owners, today);
             children.add(new TokenService.ChildParcel(childRef, childId, owners));
         }
-        return tokens.split(stateCode, parentId, ctx.id(), children);
+        CurrentUser user = CurrentUser.require();
+        return tokens.subdivide(stateCode, parentId, ctx.propertyRef(), ctx.id(), children,
+                new TokenService.ChainEvent("REGISTER", "REGISTRATION_OFFICER", user.id(), "APPROVED", "REGISTERED",
+                        null));
     }
 
     /** The new properties a subdivision transaction created at Register, with their current owners. */
@@ -207,12 +210,16 @@ public class RegistrationService {
     public static final String CHILD_PROPERTIES_SQL = """
             SELECT tp.seq, tp.allotted_side, p.property_ref, p.status, p.survey_no, p.subdivision_no,
                    p.extent_value, p.extent_unit, p.boundary_north, p.boundary_south, p.boundary_east,
-                   p.boundary_west, t.token_ref,
+                   p.boundary_west, t.token_ref, t.status AS token_status, t.approval_status,
+                   t.state_version AS token_blocks, parent_token.token_ref AS parent_token_ref,
+                   parent.property_ref AS parent_property_ref,
                    (SELECT string_agg(o.owner_name, ', ' ORDER BY o.id) FROM core.property_owner o
                      WHERE o.property_id = p.id AND o.effective_to IS NULL) AS owners
               FROM core.transaction_property tp
               JOIN core.property p ON p.id = tp.property_id
               LEFT JOIN chain.token t ON t.id = p.token_id
+              LEFT JOIN chain.token parent_token ON parent_token.id = t.parent_token_id
+              LEFT JOIN core.property parent ON parent.id = p.parent_property_id
              WHERE tp.transaction_id = :txnId
              ORDER BY tp.seq
             """;

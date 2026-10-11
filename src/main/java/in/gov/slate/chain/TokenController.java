@@ -32,7 +32,7 @@ public class TokenController {
     public Map<String, Object> token(@PathVariable String tokenRef) {
         CurrentUser.require().requirePermission("TOKEN_READ");
         var rows = jdbc.queryForList("""
-                SELECT t.id, t.token_ref, t.state_version, t.status, t.minted_at, t.superseded_at,
+                SELECT t.id, t.token_ref, t.state_version, t.status, t.approval_status, t.minted_at, t.superseded_at,
                        p.property_ref, parent.token_ref AS parent_token_ref,
                        encode(t.owner_set_hash,'hex') AS owner_set_hash,
                        encode(t.property_ref_hash,'hex') AS property_ref_hash
@@ -44,7 +44,14 @@ public class TokenController {
         if (rows.isEmpty()) {
             throw ApiException.notFound("Token " + tokenRef);
         }
-        return rows.get(0);
+        Map<String, Object> out = new java.util.LinkedHashMap<>(rows.get(0));
+        out.put("children", jdbc.queryForList("""
+                SELECT c.token_ref, c.status, c.approval_status, c.state_version, p.property_ref,
+                       p.status AS property_status
+                  FROM chain.token c JOIN core.property p ON p.id = c.property_id
+                 WHERE c.parent_token_id = :id ORDER BY c.id
+                """, new MapSqlParameterSource("id", out.get("id"))));
+        return out;
     }
 
     @GetMapping("/{tokenRef}/history")
