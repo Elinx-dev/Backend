@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import in.gov.slate.common.ApiException;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
+import in.gov.slate.survey.RecordDetailSupport;
 import in.gov.slate.survey.SiteVisitSupport;
 import in.gov.slate.transaction.TransactionContext;
 import in.gov.slate.transaction.TransactionRepository;
@@ -154,6 +155,7 @@ public class VaoService {
             out.put("objections", jdbc.queryForList(
                     "SELECT * FROM revenue.objection WHERE mutation_id = :id ORDER BY id", mutationParam));
         }
+        RecordDetailSupport.addRecordDetails(jdbc, ctx, out);
         return out;
     }
 
