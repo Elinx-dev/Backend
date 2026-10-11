@@ -12,7 +12,6 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import in.gov.slate.common.ApiException;
@@ -45,9 +44,6 @@ public class FeeService {
         this.workflow = workflow;
         this.audit = audit;
         this.mapper = mapper;
-    }
-
-    public record FeeInput(Integer pageCount) {
     }
 
     public Map<String, Object> guidelineValue(String txnRef) {
@@ -124,7 +120,7 @@ public class FeeService {
     }
 
     @Transactional
-    public Map<String, Object> calculate(String txnRef, Integer pageCount) {
+    public Map<String, Object> calculate(String txnRef) {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("FEE_CALCULATE");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
@@ -186,11 +182,8 @@ public class FeeService {
             tds = consideration.multiply(tdsRate).setScale(2, RoundingMode.HALF_UP);
         }
 
-        FeeCalculator.OtherCharges other = FeeCalculator.otherCharges(jsonOf(feeMaster.get("other_charges")),
-                pageCount);
-        BigDecimal otherCharges = other.total();
         BigDecimal surveyFee = surveyFee(ctx);
-        BigDecimal total = stampDuty.add(registrationFee).add(tds).add(otherCharges).add(surveyFee);
+        BigDecimal total = stampDuty.add(registrationFee).add(tds).add(surveyFee);
 
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("guideline", guideline);
@@ -202,8 +195,6 @@ public class FeeService {
         input.put("gazetteReference", feeMaster.get("gazette_reference"));
         input.put("stampDutyCalcType", feeMaster.get("stamp_duty_calc_type"));
         input.put("registrationFeeCalcType", feeMaster.get("registration_fee_calc_type"));
-        input.put("pageCount", pageCount);
-        input.put("otherChargeLines", other.lines());
         input.put("scheduleLines", scheduleLines);
         input.put("surveyLocationType", ctx.transaction().get("survey_location_type"));
         input.put("surveyFee", surveyFee);
@@ -211,9 +202,9 @@ public class FeeService {
         Long calculationId = jdbc.queryForObject("""
                 INSERT INTO core.fee_calculation (transaction_id, fee_master_id, fee_master_version,
                     valuation_basis_used, valuation_amount, stamp_duty, registration_fee, tds_amount,
-                    other_charges, survey_fee, total_payable, page_count, calculation_input_json)
+                    survey_fee, total_payable, calculation_input_json)
                 VALUES (:txnId, :feeMasterId, :version, :basis, :valuation, :stampDuty, :registrationFee,
-                    :tds, :otherCharges, :surveyFee, :total, :pageCount, cast(:input AS jsonb))
+                    :tds, :surveyFee, :total, cast(:input AS jsonb))
                 RETURNING id
                 """, new MapSqlParameterSource()
                 .addValue("txnId", ctx.id())
@@ -224,10 +215,8 @@ public class FeeService {
                 .addValue("stampDuty", stampDuty)
                 .addValue("registrationFee", registrationFee)
                 .addValue("tds", tds)
-                .addValue("otherCharges", otherCharges)
                 .addValue("surveyFee", surveyFee)
                 .addValue("total", total)
-                .addValue("pageCount", pageCount)
                 .addValue("input", json(input)), Long.class);
 
         for (int i = 0; i < scheduleLines.size(); i++) {
@@ -264,7 +253,6 @@ public class FeeService {
         out.put("stampDuty", stampDuty);
         out.put("registrationFee", registrationFee);
         out.put("tdsAmount", tds);
-        out.put("otherCharges", otherCharges);
         out.put("surveyFee", surveyFee);
         out.put("totalPayable", total);
         return out;
@@ -329,17 +317,6 @@ public class FeeService {
             throw ApiException.notFound("Active survey fee for location type " + locationType);
         }
         return fees.get(0).setScale(2, RoundingMode.HALF_UP);
-    }
-
-    private JsonNode jsonOf(Object raw) {
-        if (raw == null) {
-            return null;
-        }
-        try {
-            return mapper.readTree(raw.toString());
-        } catch (Exception e) {
-            throw ApiException.conflict("Fee Master other charges are not valid JSON");
-        }
     }
 
     private BigDecimal decimal(Object value) {
