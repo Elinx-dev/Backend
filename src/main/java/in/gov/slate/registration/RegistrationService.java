@@ -129,6 +129,9 @@ public class RegistrationService {
         out.put("registrationDate", today);
         out.put("registeringSro", ctx.transaction().get("sro_code"));
         out.put("deedSha256", Hashes.hex(deedHash));
+        if (chain != null) {
+            chain.anchorDeed((String) ctx.transaction().get("state_code"), ctx.id(), documentNo, deedHash);
+        }
         out.put("token", token);
         out.put("registeredOwners", resultingOwners);
         out.put("newProperties", newProperties);
@@ -414,4 +417,12 @@ public class RegistrationService {
             throw new IllegalStateException("Cannot serialise registration payload", e);
         }
     }
+
+    private in.gov.slate.chain.ChainService chain;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void setChainService(in.gov.slate.chain.ChainService chain) {
+        this.chain = chain;
+    }
+
 }
