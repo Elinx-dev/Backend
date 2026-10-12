@@ -152,7 +152,7 @@ public class ChainService {
             log.info("Ledger rejected anchor {}: {}", id, e.getMessage());
             markRejected(id, e.getMessage());
             return true;
-        } catch (Exception e) {
+        } catch (Exception | LinkageError e) {
             log.warn("Ledger anchor {} failed: {}", id, e.getMessage());
             markFailed(id, attempts + 1, e.getMessage());
             return false;

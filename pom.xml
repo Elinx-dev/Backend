@@ -21,6 +21,7 @@
         <java.version>17</java.version>
         <fabric-gateway.version>1.7.1</fabric-gateway.version>
         <grpc.version>1.69.0</grpc.version>
+        <protobuf.version>4.29.3</protobuf.version>
         <jjwt.version>0.12.6</jjwt.version>
     </properties>
 
@@ -86,6 +87,11 @@
             <groupId>org.hyperledger.fabric</groupId>
             <artifactId>fabric-gateway</artifactId>
             <version>${fabric-gateway.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>${protobuf.version}</version>
         </dependency>
         <dependency>
             <groupId>io.grpc</groupId>
