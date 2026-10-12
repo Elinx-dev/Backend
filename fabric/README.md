@@ -52,6 +52,23 @@ Only hashes and pseudonymous ids. Names, Aadhaar, PAN, extent and boundaries sta
 Reads: `ReadParcel`, `HasState`, `DeedOf`, `Encumbrances`, `History`, `CanTransfer`.
 Transfer is blocked while any encumbrance is active. Fractional ownership is 10,000 share units per parcel.
 
+## Test each node
+
+```
+docker compose --profile tools run --rm cli registration info      # height + block hash on that peer
+docker compose --profile tools run --rm cli revenue info
+docker compose --profile tools run --rm cli survey info
+docker compose --profile tools run --rm cli survey chaincode        # chaincode committed + approvals
+docker compose --profile tools run --rm cli revenue query ReadParcel SLATE-TN-00000001
+docker compose --profile tools run --rm cli survey query History SLATE-TN-00000001
+docker compose --profile tools run --rm cli revenue query CanTransfer SLATE-TN-00000001 1
+docker compose --profile tools run --rm cli registration query DeedOf 000005/2026
+```
+
+All three peers must show the same height and block hash. Node-down test: `docker stop peer0.survey.slate.local`,
+register a transaction (still MINED: 2 of 3 orgs endorse), `docker start peer0.survey.slate.local`, then `info` on
+survey catches up to the same height. With 2 peers stopped, rows go FAILED and are retried once they are back.
+
 ## Check from SQL
 
 ```
