@@ -1,0 +1,150 @@
+# Local SLATE permissioned ledger: Hyperledger Fabric 2.5, channel "slate",
+# orgs RegistrationMSP / RevenueMSP / SurveyMSP, chaincode "slateland" run as a service.
+# Start:  docker compose up -d --build     (first run generates certs, channel and chaincode)
+# Stop:   docker compose stop               (ledger kept in named volumes)
+# Wipe:   docker compose down -v && rm -rf organizations channel-artifacts
+name: slate-fabric
+
+x-peer-env: &peer-env
+  CORE_PEER_TLS_ENABLED: "true"
+  CORE_PEER_TLS_CERT_FILE: /etc/hyperledger/fabric/tls/server.crt
+  CORE_PEER_TLS_KEY_FILE: /etc/hyperledger/fabric/tls/server.key
+  CORE_PEER_TLS_ROOTCERT_FILE: /etc/hyperledger/fabric/tls/ca.crt
+  CORE_PEER_LISTENADDRESS: 0.0.0.0:7051
+  CORE_PEER_CHAINCODELISTENADDRESS: 0.0.0.0:7052
+  CORE_PEER_MSPCONFIGPATH: /etc/hyperledger/fabric/msp
+  CORE_PEER_GATEWAY_ENABLED: "true"
+  CORE_PEER_PROFILE_ENABLED: "false"
+  CORE_LEDGER_STATE_STATEDATABASE: goleveldb
+  CORE_VM_ENDPOINT: ""
+  FABRIC_LOGGING_SPEC: INFO
+
+services:
+  orderer.slate.local:
+    image: hyperledger/fabric-orderer:2.5
+    container_name: orderer.slate.local
+    restart: unless-stopped
+    depends_on:
+      certs: {condition: service_completed_successfully}
+    environment:
+      FABRIC_LOGGING_SPEC: INFO
+      ORDERER_GENERAL_LISTENADDRESS: 0.0.0.0
+      ORDERER_GENERAL_LISTENPORT: "7050"
+      ORDERER_GENERAL_LOCALMSPID: OrdererMSP
+      ORDERER_GENERAL_LOCALMSPDIR: /var/hyperledger/orderer/msp
+      ORDERER_GENERAL_TLS_ENABLED: "true"
+      ORDERER_GENERAL_TLS_PRIVATEKEY: /var/hyperledger/orderer/tls/server.key
+      ORDERER_GENERAL_TLS_CERTIFICATE: /var/hyperledger/orderer/tls/server.crt
+      ORDERER_GENERAL_TLS_ROOTCAS: "[/var/hyperledger/orderer/tls/ca.crt]"
+      ORDERER_GENERAL_CLUSTER_CLIENTCERTIFICATE: /var/hyperledger/orderer/tls/server.crt
+      ORDERER_GENERAL_CLUSTER_CLIENTPRIVATEKEY: /var/hyperledger/orderer/tls/server.key
+      ORDERER_GENERAL_CLUSTER_ROOTCAS: "[/var/hyperledger/orderer/tls/ca.crt]"
+      ORDERER_GENERAL_BOOTSTRAPMETHOD: none
+      ORDERER_CHANNELPARTICIPATION_ENABLED: "true"
+      ORDERER_ADMIN_LISTENADDRESS: 0.0.0.0:7053
+      ORDERER_ADMIN_TLS_ENABLED: "true"
+      ORDERER_ADMIN_TLS_CERTIFICATE: /var/hyperledger/orderer/tls/server.crt
+      ORDERER_ADMIN_TLS_PRIVATEKEY: /var/hyperledger/orderer/tls/server.key
+      ORDERER_ADMIN_TLS_ROOTCAS: "[/var/hyperledger/orderer/tls/ca.crt]"
+      ORDERER_ADMIN_TLS_CLIENTAUTHREQUIRED: "true"
+      ORDERER_ADMIN_TLS_CLIENTROOTCAS: "[/var/hyperledger/orderer/tls/ca.crt]"
+      ORDERER_FILELEDGER_LOCATION: /var/hyperledger/production/orderer
+    volumes:
+      - ./organizations/ordererOrganizations/slate.local/orderers/orderer.slate.local/msp:/var/hyperledger/orderer/msp
+      - ./organizations/ordererOrganizations/slate.local/orderers/orderer.slate.local/tls:/var/hyperledger/orderer/tls
+      - orderer-data:/var/hyperledger/production/orderer
+    ports: ["7050:7050", "7053:7053"]
+    networks: [fabric]
+
+  peer0.registration.slate.local:
+    image: hyperledger/fabric-peer:2.5
+    container_name: peer0.registration.slate.local
+    restart: unless-stopped
+    depends_on: [orderer.slate.local]
+    environment:
+      <<: *peer-env
+      CORE_PEER_ID: peer0.registration.slate.local
+      CORE_PEER_ADDRESS: peer0.registration.slate.local:7051
+      CORE_PEER_GOSSIP_BOOTSTRAP: peer0.registration.slate.local:7051
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: peer0.registration.slate.local:7051
+      CORE_PEER_LOCALMSPID: RegistrationMSP
+    volumes:
+      - ./organizations/peerOrganizations/registration.slate.local/peers/peer0.registration.slate.local/msp:/etc/hyperledger/fabric/msp
+      - ./organizations/peerOrganizations/registration.slate.local/peers/peer0.registration.slate.local/tls:/etc/hyperledger/fabric/tls
+      - peer-registration-data:/var/hyperledger/production
+    ports: ["7051:7051"]
+    networks: [fabric]
+
+  peer0.revenue.slate.local:
+    image: hyperledger/fabric-peer:2.5
+    container_name: peer0.revenue.slate.local
+    restart: unless-stopped
+    depends_on: [orderer.slate.local]
+    environment:
+      <<: *peer-env
+      CORE_PEER_ID: peer0.revenue.slate.local
+      CORE_PEER_ADDRESS: peer0.revenue.slate.local:7051
+      CORE_PEER_GOSSIP_BOOTSTRAP: peer0.revenue.slate.local:7051
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: peer0.revenue.slate.local:7051
+      CORE_PEER_LOCALMSPID: RevenueMSP
+    volumes:
+      - ./organizations/peerOrganizations/revenue.slate.local/peers/peer0.revenue.slate.local/msp:/etc/hyperledger/fabric/msp
+      - ./organizations/peerOrganizations/revenue.slate.local/peers/peer0.revenue.slate.local/tls:/etc/hyperledger/fabric/tls
+      - peer-revenue-data:/var/hyperledger/production
+    ports: ["8051:7051"]
+    networks: [fabric]
+
+  peer0.survey.slate.local:
+    image: hyperledger/fabric-peer:2.5
+    container_name: peer0.survey.slate.local
+    restart: unless-stopped
+    depends_on: [orderer.slate.local]
+    environment:
+      <<: *peer-env
+      CORE_PEER_ID: peer0.survey.slate.local
+      CORE_PEER_ADDRESS: peer0.survey.slate.local:7051
+      CORE_PEER_GOSSIP_BOOTSTRAP: peer0.survey.slate.local:7051
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: peer0.survey.slate.local:7051
+      CORE_PEER_LOCALMSPID: SurveyMSP
+    volumes:
+      - ./organizations/peerOrganizations/survey.slate.local/peers/peer0.survey.slate.local/msp:/etc/hyperledger/fabric/msp
+      - ./organizations/peerOrganizations/survey.slate.local/peers/peer0.survey.slate.local/tls:/etc/hyperledger/fabric/tls
+      - peer-survey-data:/var/hyperledger/production
+    ports: ["9051:7051"]
+    networks: [fabric]
+
+  # One-shot: generates development certificates (cryptogen) if they don't exist yet.
+  certs:
+    image: hyperledger/fabric-tools:2.5
+    working_dir: /fabric
+    entrypoint: ["bash", "scripts/certs.sh"]
+    volumes: ["./:/fabric"]
+    networks: [fabric]
+
+  # One-shot: creates channel "slate", joins the peers and deploys chaincode "slateland". Idempotent.
+  setup:
+    image: hyperledger/fabric-tools:2.5
+    working_dir: /fabric
+    entrypoint: ["bash", "scripts/setup.sh"]
+    depends_on: [peer0.registration.slate.local, peer0.revenue.slate.local, peer0.survey.slate.local]
+    volumes: ["./:/fabric"]
+    networks: [fabric]
+
+  slateland-cc:
+    build: ./chaincode/slateland
+    container_name: slateland-cc
+    restart: unless-stopped
+    environment:
+      CHAINCODE_SERVER_ADDRESS: 0.0.0.0:9999
+    volumes: ["./channel-artifacts:/ccid:ro"]
+    networks: [fabric]
+
+volumes:
+  orderer-data:
+  peer-registration-data:
+  peer-revenue-data:
+  peer-survey-data:
+
+networks:
+  fabric:
+    name: slate_fabric

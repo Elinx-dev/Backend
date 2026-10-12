@@ -1,0 +1,33 @@
+# cryptogen input for the local SLATE Fabric network (development certificates only).
+OrdererOrgs:
+  - Name: Orderer
+    Domain: slate.local
+    EnableNodeOUs: true
+    Specs:
+      - Hostname: orderer
+        SANS: [localhost, 127.0.0.1]
+PeerOrgs:
+  - Name: Registration
+    Domain: registration.slate.local
+    EnableNodeOUs: true
+    Specs:
+      - Hostname: peer0
+        SANS: [localhost, 127.0.0.1]
+    Users:
+      Count: 1
+  - Name: Revenue
+    Domain: revenue.slate.local
+    EnableNodeOUs: true
+    Specs:
+      - Hostname: peer0
+        SANS: [localhost, 127.0.0.1]
+    Users:
+      Count: 1
+  - Name: Survey
+    Domain: survey.slate.local
+    EnableNodeOUs: true
+    Specs:
+      - Hostname: peer0
+        SANS: [localhost, 127.0.0.1]
+    Users:
+      Count: 1
