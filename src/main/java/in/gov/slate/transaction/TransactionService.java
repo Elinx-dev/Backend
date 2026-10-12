@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import in.gov.slate.common.ApiException;
+import in.gov.slate.common.AuditEvent;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.common.Hashes;
@@ -619,6 +620,44 @@ public class TransactionService {
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
         workflow.apply(ctx, actionCode, reason, user);
         return detail(txnRef);
+    }
+
+    @Transactional
+    public void deleteDraft(String txnRef) {
+        CurrentUser user = CurrentUser.require();
+        user.requirePermission("TXN_EDIT");
+        TransactionContext ctx = repository.load(txnRef, user.stateCode());
+        if (!"DRAFT".equals(ctx.status())) {
+            throw ApiException.conflict("Only a Draft transaction can be deleted; " + ctx.txnRef() + " is "
+                    + ctx.status() + ". Use Withdraw instead.");
+        }
+        var params = new MapSqlParameterSource("id", ctx.id());
+        for (String sql : List.of(
+                "UPDATE core.partition_member SET parent_member_id = NULL WHERE transaction_id = :id",
+                "DELETE FROM core.partition_member WHERE transaction_id = :id",
+                "DELETE FROM core.consent_record WHERE transaction_id = :id",
+                "DELETE FROM core.document_content WHERE document_id IN "
+                        + "(SELECT id FROM core.document WHERE transaction_id = :id)",
+                "DELETE FROM core.document WHERE transaction_id = :id",
+                "DELETE FROM core.transaction_schedule_survey WHERE schedule_id IN "
+                        + "(SELECT id FROM core.transaction_schedule WHERE transaction_id = :id)",
+                "DELETE FROM core.transaction_schedule WHERE transaction_id = :id",
+                "DELETE FROM core.fee_calculation_line WHERE fee_calculation_id IN "
+                        + "(SELECT id FROM core.fee_calculation WHERE transaction_id = :id)",
+                "DELETE FROM core.fee_calculation WHERE transaction_id = :id",
+                "DELETE FROM core.witness WHERE transaction_id = :id",
+                "DELETE FROM core.transaction_property WHERE transaction_id = :id",
+                "UPDATE core.property_owner SET transaction_id = NULL WHERE transaction_id = :id",
+                "DELETE FROM core.transaction_party WHERE transaction_id = :id",
+                "DELETE FROM core.transaction WHERE id = :id")) {
+            jdbc.update(sql, params);
+        }
+        audit.record(AuditEvent.of("TRANSACTION_DELETED")
+                .entity("TRANSACTION", String.valueOf(ctx.id()))
+                .transactionRef(ctx.txnRef())
+                .propertyRef(ctx.propertyRef())
+                .before(Map.of("status", ctx.status()))
+                .detail("Draft transaction deleted"));
     }
 
     private void requireRelationshipCategory(String stateCode, String transactionType, String category) {
