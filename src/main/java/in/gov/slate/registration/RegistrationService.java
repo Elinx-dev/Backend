@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import in.gov.slate.chain.TokenService;
+import in.gov.slate.property.PropertyService;
 import in.gov.slate.common.ApiException;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
@@ -140,8 +141,9 @@ public class RegistrationService {
 
     /**
      * Subdivision at Register: the property is split into two new properties linked to this one transaction.
-     * Property 1 goes to the buyers (second party) with the transferred extent, property 2 to the sellers with
-     * the rest. Both copy the parent's survey number, subdivision and details; the Surveyor corrects them later.
+     * Property 1 goes to the buyers (second party) with the transferred extent, property 2 keeps the parent's
+     * existing owner set with the rest. Both copy the parent's survey number, subdivision, details and boundary
+     * measurements; the Surveyor corrects them later.
      * The parent becomes INACTIVE and its owners are closed by {@link TokenService#split}.
      */
     private List<Map<String, Object>> createSubdivisionProperties(TransactionContext ctx, LocalDate today) {
@@ -166,9 +168,14 @@ public class RegistrationService {
         List<TokenService.ChildParcel> children = new ArrayList<>();
         int seq = 1;
         for (String side : List.of("SIDE_2", "SIDE_1")) {
-            List<TokenService.Owner> owners = ctx.side(side).stream()
-                    .map(party -> new TokenService.Owner((String) party.get("name"), null))
-                    .toList();
+            List<TokenService.Owner> owners = "SIDE_1".equals(side) && !ctx.propertyOwners().isEmpty()
+                    ? ctx.propertyOwners().stream()
+                            .map(owner -> new TokenService.Owner((String) owner.get("owner_name"),
+                                    decimal(owner.get("share_pct"))))
+                            .toList()
+                    : ctx.side(side).stream()
+                            .map(party -> new TokenService.Owner((String) party.get("name"), null))
+                            .toList();
             if (owners.isEmpty()) {
                 throw ApiException.conflict("Subdivision needs at least one " + ("SIDE_2".equals(side) ? "buyer" : "seller"));
             }
@@ -198,6 +205,7 @@ public class RegistrationService {
                         extent_unit)
                     SELECT id, 1, survey_no, subdivision_no, extent_value, extent_unit FROM core.property WHERE id = :id
                     """, new MapSqlParameterSource("id", childId));
+            PropertyService.copyBoundaryMeasurements(jdbc, parentId, childId);
             jdbc.update("""
                     INSERT INTO core.transaction_property (transaction_id, property_id, seq, allotted_side)
                     VALUES (:txnId, :propertyId, :seq, :side)

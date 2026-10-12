@@ -252,16 +252,31 @@ public class RevenueService {
                  WHERE id = :id
                 """, new MapSqlParameterSource().addValue("id", mutationId).addValue("remarks", req.remarks()));
 
-        jdbc.update("""
-                INSERT INTO revenue.current_state (property_id, revenue_record_ref, revenue_survey_no,
-                    revenue_subdivision_no, land_context, owners, extent_value, extent_unit, classification,
-                    record_status, source_reference)
+        // A subdivision's parent is inactive; each child property gets its own Revenue record and owners.
+        String revenueRows = ctx.subdivisionAtRegistration() ? """
+                SELECT p.id, :recordNumber, p.survey_no, p.subdivision_no, :landContext,
+                       COALESCE((SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
+                                            'name', o.owner_name, 'sharePct', o.share_pct)) ORDER BY o.id)
+                                   FROM core.property_owner o
+                                  WHERE o.property_id = p.id AND o.effective_to IS NULL), '[]'::jsonb),
+                       p.extent_value, p.extent_unit, p.classification_code, 'ACTIVE', :sourceRef
+                  FROM revenue.proposed_mutation m
+                  JOIN core.transaction_property tp ON tp.transaction_id = m.transaction_id
+                  JOIN core.property p ON p.id = tp.property_id
+                 WHERE m.id = :id
+                 ORDER BY tp.seq
+                """ : """
                 SELECT p.id, :recordNumber, p.survey_no, p.subdivision_no, :landContext,
                        m.proposed_owner_set, p.extent_value, p.extent_unit, p.classification_code, 'ACTIVE',
                        :sourceRef
                   FROM revenue.proposed_mutation m JOIN core.property p ON p.id = m.property_id
                  WHERE m.id = :id
-                """, new MapSqlParameterSource()
+                """;
+        jdbc.update("""
+                INSERT INTO revenue.current_state (property_id, revenue_record_ref, revenue_survey_no,
+                    revenue_subdivision_no, land_context, owners, extent_value, extent_unit, classification,
+                    record_status, source_reference)
+                """ + revenueRows, new MapSqlParameterSource()
                 .addValue("id", mutationId)
                 .addValue("recordNumber", pushed.revenueRecordRef())
                 .addValue("landContext", RevenueLandContext.forLegacySnapshot(

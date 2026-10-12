@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import in.gov.slate.chain.TokenService;
+import in.gov.slate.property.PropertyService;
 import in.gov.slate.common.ApiException;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
@@ -420,6 +421,7 @@ public class SurveyService {
                     .addValue("parentId", parentPropertyId)
                     .addValue("userId", CurrentUser.require().id()), keyHolder, new String[]{"id"});
             long childPropertyId = keyHolder.getKey().longValue();
+            PropertyService.copyBoundaryMeasurements(jdbc, parentPropertyId, childPropertyId);
 
             List<TokenService.Owner> owners = new ArrayList<>();
             if (parcel.owners() != null) {
