@@ -19,7 +19,8 @@
 
     <properties>
         <java.version>17</java.version>
-        <web3j.version>4.12.0</web3j.version>
+        <fabric-gateway.version>1.7.1</fabric-gateway.version>
+        <grpc.version>1.69.0</grpc.version>
         <jjwt.version>0.12.6</jjwt.version>
     </properties>
 
@@ -82,9 +83,15 @@
             <scope>runtime</scope>
         </dependency>
         <dependency>
-            <groupId>org.web3j</groupId>
-            <artifactId>core</artifactId>
-            <version>${web3j.version}</version>
+            <groupId>org.hyperledger.fabric</groupId>
+            <artifactId>fabric-gateway</artifactId>
+            <version>${fabric-gateway.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-netty-shaded</artifactId>
+            <version>${grpc.version}</version>
+            <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>org.springdoc</groupId>

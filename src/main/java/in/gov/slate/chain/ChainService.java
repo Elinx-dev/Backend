@@ -16,28 +16,15 @@ import org.springframework.stereotype.Service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import org.web3j.abi.FunctionEncoder;
-import org.web3j.abi.FunctionReturnDecoder;
-import org.web3j.abi.datatypes.Bool;
-import org.web3j.abi.datatypes.Function;
-import org.web3j.abi.datatypes.Type;
-import org.web3j.abi.datatypes.Utf8String;
-import org.web3j.abi.datatypes.generated.Bytes32;
-import org.web3j.abi.datatypes.generated.Uint256;
-import org.web3j.crypto.Credentials;
-import org.web3j.protocol.Web3j;
-import org.web3j.protocol.core.DefaultBlockParameterName;
-import org.web3j.protocol.core.methods.request.Transaction;
-import org.web3j.protocol.http.HttpService;
-import org.web3j.tx.RawTransactionManager;
-import org.web3j.utils.Numeric;
+import in.gov.slate.chain.FabricLedger.Org;
 
 /**
- * Blockchain anchoring and read-back on the SLATE Besu network.
- * {@link #anchor} only queues the entry inside the caller's DB transaction, so Register never
- * waits on the chain. {@link #processQueue} sends queued entries (with retries) and records
- * SUBMITTED, then MINED with the block number. When the chain is switched off or has no
- * contract or key, the entry is recorded as SKIPPED and the registry keeps working.
+ * Ledger anchoring and read-back on the SLATE Hyperledger Fabric network (chaincode slateland).
+ * {@link #anchor} only queues the entry inside the caller's DB transaction, so Register never waits on
+ * the ledger. {@link #processQueue} submits queued entries as the actor's organisation (with retries)
+ * and records MINED with the block number once the transaction is committed. A chaincode rule
+ * rejection (double sale, active encumbrance, wrong organisation) is REJECTED and not retried. When the
+ * ledger is switched off or its identities are missing, the entry is SKIPPED and the registry keeps working.
  */
 @Service
 public class ChainService {
@@ -47,25 +34,17 @@ public class ChainService {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper mapper;
+    private final FabricLedger ledger;
     private final boolean enabled;
-    private final String rpcUrl;
-    private final long chainId;
-    private final String submitterKey;
     private final int maxAttempts;
-    private Web3j web3j;
 
-    public ChainService(NamedParameterJdbcTemplate jdbc, ObjectMapper mapper,
+    public ChainService(NamedParameterJdbcTemplate jdbc, ObjectMapper mapper, FabricLedger ledger,
                         @Value("${slate.chain.enabled}") boolean enabled,
-                        @Value("${slate.chain.rpc-primary}") String rpcUrl,
-                        @Value("${slate.chain.chain-id}") long chainId,
-                        @Value("${slate.chain.submitter-private-key:}") String submitterKey,
                         @Value("${slate.chain.max-attempts:5}") int maxAttempts) {
         this.jdbc = jdbc;
         this.mapper = mapper;
+        this.ledger = ledger;
         this.enabled = enabled;
-        this.rpcUrl = rpcUrl;
-        this.chainId = chainId;
-        this.submitterKey = submitterKey;
         this.maxAttempts = maxAttempts;
     }
 
@@ -74,7 +53,7 @@ public class ChainService {
                                 BigInteger onchainTokenId, byte[] stateHash, String tokenRef) {
     }
 
-    /** Queues the anchor; returns null because the transaction hash is only known after the worker sends it. */
+    /** Queues the anchor; returns null because the Fabric transaction id is only known after the worker submits it. */
     public String anchor(AnchorRequest request) {
         long rowId = queue(request);
         String reason = skipReason(request.stateCode());
@@ -84,10 +63,15 @@ public class ChainService {
         return null;
     }
 
-    /** Queues the registered deed's SHA-256 so the certificate QR can be checked against the chain. */
+    /** Queues the registered deed's SHA-256 so the certificate QR can be checked against the ledger. */
     public void anchorDeed(String stateCode, long transactionId, String documentNo, byte[] deedHash) {
+        String tokenRef = jdbc.query("""
+                SELECT t.token_ref FROM core.transaction tx JOIN core.property p ON p.id = tx.property_id
+                  JOIN chain.token t ON t.id = p.token_id WHERE tx.id = :id
+                """, new MapSqlParameterSource("id", transactionId), rs -> rs.next() ? rs.getString(1) : "");
         anchor(new AnchorRequest(stateCode, CONTRACT, "recordDeed",
-                Map.of("documentNo", documentNo, "deedHash", Numeric.toHexString(deedHash)),
+                Map.of("documentNo", documentNo, "deedHash", in.gov.slate.common.Hashes.hex(deedHash),
+                        "tokenRef", tokenRef == null ? "" : tokenRef, "role", "REGISTRATION_OFFICER"),
                 transactionId, null, null, deedHash, documentNo));
     }
 
@@ -97,21 +81,26 @@ public class ChainService {
 
     String skipReason(String stateCode) {
         if (!enabled) {
-            return "Chain anchoring is disabled (slate.chain.enabled=false)";
+            return "Ledger anchoring is disabled (slate.chain.enabled=false)";
         }
-        if (contractAddress(stateCode) == null) {
-            return "No deployed address configured for contract " + CONTRACT;
-        }
-        if (submitterKey == null || submitterKey.isBlank()) {
-            return "No submitter key is configured";
-        }
-        return null;
+        return ledger.missingCrypto();
+    }
+
+    public FabricLedger ledger() {
+        return ledger;
     }
 
     @Scheduled(fixedDelayString = "${slate.chain.worker-delay-ms:5000}", initialDelayString = "${slate.chain.worker-delay-ms:5000}")
     public void processQueue() {
-        if (!enabled || submitterKey == null || submitterKey.isBlank()) {
+        if (skipReason(null) != null) {
             return;
+        }
+        var submitted = jdbc.queryForList("""
+                SELECT id, tx_hash FROM chain.blockchain_transaction
+                 WHERE status = 'SUBMITTED' ORDER BY id LIMIT 50
+                """, Map.of());
+        for (Map<String, Object> row : submitted) {
+            confirm(((Number) row.get("id")).longValue(), (String) row.get("tx_hash"));
         }
         var due = jdbc.queryForList("""
                 SELECT id, state_code, function_name, args_json::text AS args, attempts
@@ -121,18 +110,14 @@ public class ChainService {
                  ORDER BY id LIMIT 20
                 """, new MapSqlParameterSource("max", maxAttempts));
         for (Map<String, Object> row : due) {
-            send(row);
-        }
-        var submitted = jdbc.queryForList("""
-                SELECT id, tx_hash FROM chain.blockchain_transaction
-                 WHERE status = 'SUBMITTED' ORDER BY id LIMIT 50
-                """, Map.of());
-        for (Map<String, Object> row : submitted) {
-            confirm(((Number) row.get("id")).longValue(), (String) row.get("tx_hash"));
+            if (!send(row)) {
+                return;
+            }
         }
     }
 
-    private void send(Map<String, Object> row) {
+    /** Submits one entry; false when the ledger is unreachable, so later entries keep their order. */
+    private boolean send(Map<String, Object> row) {
         long id = ((Number) row.get("id")).longValue();
         int attempts = ((Number) row.get("attempts")).intValue();
         int claimed = jdbc.update("""
@@ -140,105 +125,118 @@ public class ChainService {
                  WHERE id = :id AND attempts = :attempts AND status IN ('QUEUED', 'FAILED')
                 """, new MapSqlParameterSource().addValue("id", id).addValue("attempts", attempts));
         if (claimed == 0) {
-            return;
+            return true;
         }
-        String stateCode = ((String) row.get("state_code")).trim();
-        String address = contractAddress(stateCode);
-        if (address == null) {
-            markSkipped(id, "No deployed address configured for contract " + CONTRACT);
-            return;
-        }
+        Call call = null;
         try {
             Map<String, Object> args = mapper.readValue((String) row.get("args"), new TypeReference<>() { });
-            Function function = switch ((String) row.get("function_name")) {
-                case "recordTokenState" -> new Function("recordTokenState", List.of(new Uint256(BigInteger.ZERO),
-                        new Bytes32(Numeric.hexStringToByteArray((String) args.get("stateHash"))),
-                        new Utf8String((String) args.get("tokenRef"))), List.of());
-                case "recordDeed" -> new Function("recordDeed", List.of(new Utf8String((String) args.get("documentNo")),
-                        new Bytes32(Numeric.hexStringToByteArray((String) args.get("deedHash")))), List.of());
-                default -> throw new IllegalStateException("Unknown chain function " + row.get("function_name"));
-            };
-            var manager = new RawTransactionManager(web3j(), Credentials.create(submitterKey), chainId);
-            var response = manager.sendTransaction(BigInteger.ZERO, BigInteger.valueOf(500_000L), address,
-                    FunctionEncoder.encode(function), BigInteger.ZERO);
-            if (response.hasError()) {
-                markFailed(id, attempts + 1, response.getError().getMessage());
-            } else {
-                markSubmitted(id, response.getTransactionHash());
+            call = toCall((String) row.get("function_name"), args);
+            jdbc.update("""
+                    UPDATE chain.blockchain_transaction SET org_msp = :org, chaincode_function = :fn WHERE id = :id
+                    """, new MapSqlParameterSource().addValue("id", id).addValue("org", call.org().mspId())
+                    .addValue("fn", call.function()));
+            FabricLedger.Submitted result;
+            try {
+                result = ledger.submit(call.org(), call.function(), call.args());
+            } catch (FabricLedger.ChaincodeRejected e) {
+                Call fallback = lateMint(call, args, e.getMessage());
+                if (fallback == null) {
+                    throw e;
+                }
+                call = fallback;
+                result = ledger.submit(call.org(), call.function(), call.args());
             }
+            markMined(id, result, call);
+            return true;
+        } catch (FabricLedger.ChaincodeRejected e) {
+            log.info("Ledger rejected anchor {}: {}", id, e.getMessage());
+            markRejected(id, e.getMessage());
+            return true;
         } catch (Exception e) {
-            log.warn("Chain anchor {} failed: {}", id, e.getMessage());
+            log.warn("Ledger anchor {} failed: {}", id, e.getMessage());
             markFailed(id, attempts + 1, e.getMessage());
+            return false;
         }
     }
 
-    private void confirm(long id, String txHash) {
-        try {
-            var receipt = web3j().ethGetTransactionReceipt(txHash).send().getTransactionReceipt();
-            if (receipt.isEmpty()) {
-                return;
-            }
-            var r = receipt.get();
-            if (r.isStatusOK()) {
-                jdbc.update("""
-                        UPDATE chain.blockchain_transaction SET status = 'MINED', block_number = :block,
-                               gas_used = :gas, mined_at = now(), error_message = NULL WHERE id = :id
-                        """, new MapSqlParameterSource().addValue("id", id)
-                        .addValue("block", r.getBlockNumber().longValue()).addValue("gas", r.getGasUsed().longValue()));
-            } else {
-                jdbc.update("""
-                        UPDATE chain.blockchain_transaction SET status = 'FAILED', attempts = :max,
-                               block_number = :block, error_message = 'Reverted on chain' WHERE id = :id
-                        """, new MapSqlParameterSource().addValue("id", id).addValue("max", maxAttempts)
-                        .addValue("block", r.getBlockNumber().longValue()));
-            }
-        } catch (Exception e) {
-            log.warn("Receipt check for anchor {} failed: {}", id, e.getMessage());
+    record Call(Org org, String function, String[] args) {
+    }
+
+    /** Maps a queued SLATE anchor to its slateland chaincode transaction. */
+    Call toCall(String functionName, Map<String, Object> a) {
+        Org org = a.get("org") != null ? Org.forMsp(s(a.get("org"))) : Org.forRole(s(a.get("role")));
+        String version = s(a.get("version"));
+        String prev = version.isEmpty() ? "" : String.valueOf(Integer.parseInt(version) - 1);
+        return switch (functionName) {
+            case "recordDeed" -> new Call(Org.REGISTRATION, "RecordDeed",
+                    new String[]{s(a.get("documentNo")), s(a.get("deedHash")), s(a.get("tokenRef"))});
+            case "addEncumbrance" -> new Call(org, "AddEncumbrance", new String[]{s(a.get("tokenRef")),
+                    s(a.get("encRef")), s(a.get("type")), s(a.get("holderHash")), s(a.get("docHash"))});
+            case "releaseEncumbrance" -> new Call(org, "ReleaseEncumbrance",
+                    new String[]{s(a.get("tokenRef")), s(a.get("encRef")), s(a.get("docHash"))});
+            case "recordTokenState" -> switch (s(a.get("operation"))) {
+                case "MINT", "SPLIT" -> new Call(org == Org.SURVEY ? Org.SURVEY : Org.REGISTRATION, "MintParcel",
+                        mintArgs(a));
+                case "UPDATE" -> new Call(Org.REGISTRATION, "TransferParcel", new String[]{s(a.get("tokenRef")), prev,
+                        s(a.get("stateHash")), s(a.get("metadataHash")), s(a.get("geoHash")), json(a.get("shares")),
+                        s(a.get("deedNo"))});
+                case "SUPERSEDE" -> new Call(org == Org.SURVEY ? Org.SURVEY : Org.REGISTRATION, "RetireParcel",
+                        new String[]{s(a.get("tokenRef")), prev, s(a.get("stateHash")), s(a.get("status")),
+                                json(a.get("children")), s(a.get("role"))});
+                case "ANNOTATE" -> new Call(org, "Annotate", new String[]{s(a.get("tokenRef")), prev,
+                        s(a.get("stateHash")), s(a.get("action")), s(a.get("role")), s(a.get("decision"))});
+                default -> throw new IllegalStateException("Unknown token operation " + a.get("operation"));
+            };
+            default -> throw new IllegalStateException("Unknown chain function " + functionName);
+        };
+    }
+
+    private String[] mintArgs(Map<String, Object> a) {
+        return new String[]{s(a.get("tokenRef")), s(a.get("version")).isEmpty() ? "1" : s(a.get("version")),
+                s(a.get("propertyRefHash")), s(a.get("stateHash")), s(a.get("metadataHash")), s(a.get("geoHash")),
+                json(a.get("shares")), s(a.get("parentTokenRef"))};
+    }
+
+    /** A token minted while no ledger was connected is minted on its first later transfer. */
+    private Call lateMint(Call call, Map<String, Object> a, String error) {
+        if (!"TransferParcel".equals(call.function()) || !error.contains("NOT_FOUND")) {
+            return null;
+        }
+        return new Call(Org.REGISTRATION, "MintParcel", mintArgs(a));
+    }
+
+    private void confirm(long id, String txId) {
+        long block = txId == null ? -1 : ledger.blockOf(txId);
+        if (block >= 0) {
+            jdbc.update("""
+                    UPDATE chain.blockchain_transaction SET status = 'MINED', block_number = :block, mined_at = now(),
+                           error_message = NULL WHERE id = :id
+                    """, new MapSqlParameterSource().addValue("id", id).addValue("block", block));
         }
     }
 
-    /** True/false from the contract, or null when the chain is not connected or not reachable. */
+    /** True/false from the ledger, or null when the ledger is not connected or not reachable. */
     public Boolean hasState(String stateCode, String tokenRef, String stateHashHex) {
-        List<Type> out = call(stateCode, new Function("hasState", List.of(new Utf8String(tokenRef),
-                new Bytes32(Numeric.hexStringToByteArray(stateHashHex))), List.of(new org.web3j.abi.TypeReference<Bool>() { })));
-        return out == null || out.isEmpty() ? null : (Boolean) out.get(0).getValue();
+        String out = read(Org.REGISTRATION, "HasState", tokenRef, stateHashHex);
+        return out == null ? null : Boolean.parseBoolean(out.trim());
     }
 
-    /** The deed hash recorded on chain (0x-hex), "" when none is recorded, or null when not connected. */
+    /** The deed hash recorded on the ledger (0x-hex), "" when none is recorded, or null when not connected. */
     public String deedOf(String stateCode, String documentNo) {
-        List<Type> out = call(stateCode, new Function("deedOf", List.of(new Utf8String(documentNo)),
-                List.of(new org.web3j.abi.TypeReference<Bytes32>() { })));
-        if (out == null || out.isEmpty()) {
-            return null;
-        }
-        byte[] value = (byte[]) out.get(0).getValue();
-        return new BigInteger(1, value).signum() == 0 ? "" : Numeric.toHexString(value);
+        return read(Org.REGISTRATION, "DeedOf", documentNo);
     }
 
-    @SuppressWarnings("rawtypes")
-    private List<Type> call(String stateCode, Function function) {
-        if (!connected(stateCode)) {
+    /** Evaluates a read-only chaincode query; null when not connected, unreachable or not found. */
+    public String read(Org org, String function, String... args) {
+        if (!connected(null)) {
             return null;
         }
         try {
-            String from = Credentials.create(submitterKey).getAddress();
-            var result = web3j().ethCall(Transaction.createEthCallTransaction(from, contractAddress(stateCode),
-                    FunctionEncoder.encode(function)), DefaultBlockParameterName.LATEST).send();
-            if (result.hasError() || result.getValue() == null) {
-                return null;
-            }
-            return FunctionReturnDecoder.decode(result.getValue(), function.getOutputParameters());
+            return ledger.evaluate(org, function, args);
         } catch (Exception e) {
-            log.warn("Chain read {} failed: {}", function.getName(), e.getMessage());
+            log.debug("Ledger read {} failed: {}", function, e.getMessage());
             return null;
         }
-    }
-
-    synchronized Web3j web3j() {
-        if (web3j == null) {
-            web3j = Web3j.build(new HttpService(rpcUrl));
-        }
-        return web3j;
     }
 
     private long queue(AnchorRequest request) {
@@ -250,7 +248,7 @@ public class ChainService {
                     :txnId, :tokenId)
                 """, new MapSqlParameterSource()
                 .addValue("stateCode", request.stateCode())
-                .addValue("network", networkCode(request.stateCode()))
+                .addValue("network", "FABRIC_" + ledger.channel().toUpperCase())
                 .addValue("contract", request.contractCode())
                 .addValue("function", request.functionName())
                 .addValue("args", json(request.args()))
@@ -258,23 +256,6 @@ public class ChainService {
                 .addValue("txnId", request.transactionId())
                 .addValue("tokenId", request.tokenId()), keyHolder, new String[]{"id"});
         return keyHolder.getKey().longValue();
-    }
-
-    String networkCode(String stateCode) {
-        String code = jdbc.query("""
-                SELECT network_code FROM cfg.chain_network_config
-                 WHERE state_code = :stateCode ORDER BY id LIMIT 1
-                """, new MapSqlParameterSource("stateCode", stateCode), rs -> rs.next() ? rs.getString(1) : null);
-        return code == null ? "SLATE_LOCAL" : code;
-    }
-
-    String contractAddress(String stateCode) {
-        return jdbc.query("""
-                SELECT c.address FROM cfg.chain_contract c
-                 WHERE c.network_code = :networkCode AND c.contract_code = :contractCode AND c.active
-                 ORDER BY c.id DESC LIMIT 1
-                """, new MapSqlParameterSource().addValue("networkCode", networkCode(stateCode))
-                .addValue("contractCode", CONTRACT), rs -> rs.next() ? rs.getString(1) : null);
     }
 
     private void markSkipped(long id, String reason) {
@@ -290,14 +271,31 @@ public class ChainService {
                 .addValue("delay", 30 * attempts));
     }
 
-    private void markSubmitted(long id, String txHash) {
+    private void markRejected(long id, String reason) {
         jdbc.update("""
-                UPDATE chain.blockchain_transaction SET status = 'SUBMITTED', tx_hash = :txHash, error_message = NULL
-                 WHERE id = :id
-                """, new MapSqlParameterSource().addValue("id", id).addValue("txHash", txHash));
+                UPDATE chain.blockchain_transaction SET status = 'REJECTED', error_message = :reason WHERE id = :id
+                """, new MapSqlParameterSource().addValue("id", id).addValue("reason", reason));
     }
 
-    private String json(Object value) {
+    private void markMined(long id, FabricLedger.Submitted result, Call call) {
+        jdbc.update("""
+                UPDATE chain.blockchain_transaction SET status = 'MINED', tx_hash = :txId, block_number = :block,
+                       submitted_at = COALESCE(submitted_at, now()), mined_at = now(), error_message = NULL,
+                       validation_code = :code, org_msp = :org, chaincode_function = :fn
+                 WHERE id = :id
+                """, new MapSqlParameterSource().addValue("id", id).addValue("txId", result.txId())
+                .addValue("block", result.blockNumber()).addValue("code", result.validationCode())
+                .addValue("org", call.org().mspId()).addValue("fn", call.function()));
+    }
+
+    private static String s(Object value) {
+        return value == null ? "" : value.toString();
+    }
+
+    String json(Object value) {
+        if (value == null) {
+            return "";
+        }
         try {
             return mapper.writeValueAsString(value);
         } catch (Exception e) {
