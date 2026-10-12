@@ -3,6 +3,7 @@ package in.gov.slate.transaction;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -60,6 +61,12 @@ public class TransactionController {
     @GetMapping({"/{txnRef}", "/ref/{txnRef}"})
     public Map<String, Object> detail(@PathVariable String txnRef) {
         return transactions.detail(txnRef);
+    }
+
+    @DeleteMapping("/{txnRef}")
+    public Map<String, Object> deleteDraft(@PathVariable String txnRef) {
+        transactions.deleteDraft(txnRef);
+        return Map.of("deleted", txnRef);
     }
 
     @PutMapping("/{txnRef}/details")
