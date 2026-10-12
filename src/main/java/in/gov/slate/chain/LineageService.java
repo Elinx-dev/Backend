@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import in.gov.slate.common.ApiException;
+import in.gov.slate.property.PropertyService;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.common.JurisdictionGuard;
@@ -56,7 +57,7 @@ public class LineageService {
                    anchor.status AS anchor_status, anchor.tx_hash AS anchor_tx_hash,
                    anchor.block_number AS anchor_block_number, anchor.error_message AS anchor_note,
                    (SELECT string_agg(o.owner_name, ', ' ORDER BY o.id) FROM core.property_owner o
-                     WHERE o.property_id = p.id AND o.effective_to IS NULL) AS current_owners
+                     WHERE o.property_id = p.id AND %2$s) AS current_owners
               FROM nodes n
               JOIN core.property p ON p.id = n.id
               LEFT JOIN core.property parent ON parent.id = p.parent_property_id
@@ -70,7 +71,7 @@ public class LineageService {
               ) anchor ON TRUE
              WHERE p.state_code = :stateCode
              ORDER BY n.depth, p.property_ref
-            """.formatted(MAX_DEPTH);
+            """.formatted(MAX_DEPTH, PropertyService.DISPLAY_OWNERS_FILTER);
 
     private final NamedParameterJdbcTemplate jdbc;
     private final JurisdictionGuard guard;

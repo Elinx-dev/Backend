@@ -301,6 +301,32 @@ public class PropertyService {
         return get(propertyRef);
     }
 
+    /**
+     * Owners shown for a property (alias {@code o}): the current owner set, or, for a property whose owners were
+     * all closed (subdivided / superseded parent), the last owner set it had, kept for history.
+     */
+    public static final String DISPLAY_OWNERS_FILTER = """
+            (o.effective_to IS NULL
+             OR (NOT EXISTS (SELECT 1 FROM core.property_owner cur
+                              WHERE cur.property_id = o.property_id AND cur.effective_to IS NULL)
+                 AND EXISTS (SELECT 1 FROM (SELECT l.transaction_id, l.effective_from, l.effective_to
+                                              FROM core.property_owner l WHERE l.property_id = o.property_id
+                                             ORDER BY l.id DESC LIMIT 1) latest
+                              WHERE latest.transaction_id IS NOT DISTINCT FROM o.transaction_id
+                                AND latest.effective_from IS NOT DISTINCT FROM o.effective_from
+                                AND latest.effective_to IS NOT DISTINCT FROM o.effective_to)))
+            """;
+
+    /** A property created from a parent (subdivision or partition) starts with the parent's boundary measurements. */
+    public static void copyBoundaryMeasurements(NamedParameterJdbcTemplate jdbc, long parentId, long childId) {
+        jdbc.update("""
+                INSERT INTO core.property_measurement (property_id, seq, from_point, to_point, value, unit)
+                SELECT :childId, seq, from_point, to_point, value, unit
+                  FROM core.property_measurement WHERE property_id = :parentId
+                 ORDER BY seq
+                """, new MapSqlParameterSource().addValue("parentId", parentId).addValue("childId", childId));
+    }
+
     public Map<String, Object> get(String propertyRef) {
         CurrentUser user = CurrentUser.require();
         var rows = jdbc.queryForList("""
@@ -318,12 +344,13 @@ public class PropertyService {
         long id = ((Number) property.get("id")).longValue();
         var idParam = new MapSqlParameterSource("propertyId", id);
         property.put("registeredOwners", pii.revealRows(jdbc.queryForList("""
-                SELECT id, owner_type_code, owner_name, aadhaar_number, pan, mobile, address, registration_no,
-                       representative_role, representative_name, representative_designation,
-                       representative_aadhaar, representative_pan, representative_mobile,
-                       share_pct, share_note, source, effective_from
-                  FROM core.property_owner WHERE property_id = :propertyId AND effective_to IS NULL
-                 ORDER BY id
+                SELECT o.id, o.owner_type_code, o.owner_name, o.aadhaar_number, o.pan, o.mobile, o.address,
+                       o.registration_no, o.representative_role, o.representative_name,
+                       o.representative_designation, o.representative_aadhaar, o.representative_pan,
+                       o.representative_mobile, o.share_pct, o.share_note, o.source, o.effective_from,
+                       o.effective_to
+                  FROM core.property_owner o WHERE o.property_id = :propertyId AND """ + DISPLAY_OWNERS_FILTER + """
+                 ORDER BY o.id
                 """, idParam)));
         property.put("surveyRecords", jdbc.queryForList("""
                 SELECT seq, ulpin, survey_no, subdivision_no, extent_value, extent_unit
