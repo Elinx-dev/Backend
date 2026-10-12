@@ -117,7 +117,7 @@ services:
   certs:
     image: hyperledger/fabric-tools:2.5
     working_dir: /fabric
-    entrypoint: ["bash", "scripts/certs.sh"]
+    entrypoint: ["bash", "-c", "sed 's/\\r$$//' scripts/certs.sh | bash -s"]
     volumes: ["./:/fabric"]
     networks: [fabric]
 
@@ -125,7 +125,7 @@ services:
   setup:
     image: hyperledger/fabric-tools:2.5
     working_dir: /fabric
-    entrypoint: ["bash", "scripts/setup.sh"]
+    entrypoint: ["bash", "-c", "sed 's/\\r$$//' scripts/setup.sh | bash -s"]
     depends_on: [peer0.registration.slate.local, peer0.revenue.slate.local, peer0.survey.slate.local]
     volumes: ["./:/fabric"]
     networks: [fabric]
@@ -134,7 +134,7 @@ services:
   cli:
     image: hyperledger/fabric-tools:2.5
     working_dir: /fabric
-    entrypoint: ["bash", "scripts/peer.sh"]
+    entrypoint: ["bash", "-c", "sed 's/\\r$$//' scripts/peer.sh | bash -s -- \"$$@\"", "peer.sh"]
     profiles: [tools]
     volumes: ["./:/fabric"]
     networks: [fabric]
