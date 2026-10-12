@@ -130,6 +130,15 @@ services:
     volumes: ["./:/fabric"]
     networks: [fabric]
 
+  # Per-node CLI for testing: docker compose run --rm cli <registration|revenue|survey> <info|channels|chaincode|query ...>
+  cli:
+    image: hyperledger/fabric-tools:2.5
+    working_dir: /fabric
+    entrypoint: ["bash", "scripts/peer.sh"]
+    profiles: [tools]
+    volumes: ["./:/fabric"]
+    networks: [fabric]
+
   slateland-cc:
     build: ./chaincode/slateland
     container_name: slateland-cc
