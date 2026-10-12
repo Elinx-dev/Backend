@@ -336,7 +336,7 @@ public class DashboardRepository {
                             WHERE dt.state_code = t.state_code AND dt.code = t.deed_type_code) d ON TRUE
                WHERE t.initiated_at >= :from AND t.initiated_at < :to %s %s %s
         """.formatted(state(f, "t"),
-                q.status() == null ? "" : "AND t.status = :status",
+                q.status() == null ? "AND t.status <> 'WITHDRAWN'" : "AND t.status = :status",
                 q.search() == null ? "" : """
                         AND (t.txn_ref ILIKE :search OR p.property_ref ILIKE :search OR t.sro_code ILIKE :search
                              OR o.sro_name ILIKE :search OR d.name ILIKE :search OR t.deed_type_code ILIKE :search)""");
