@@ -190,7 +190,8 @@ public class FabricLedger {
         }
         String msg = details.get(0).getMessage();
         int i = msg.indexOf("message: ");
-        return i >= 0 ? msg.substring(i + 9) : msg;
+        msg = i >= 0 ? msg.substring(i + 9) : msg;
+        return msg.replaceFirst("^chaincode response \\d+, ", "");
     }
 
     private Contract contract(Org org) {
