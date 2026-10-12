@@ -822,7 +822,7 @@ public class TransactionService {
         return jdbc.queryForList("""
                 SELECT * FROM rpt.transaction_queue_view
                  WHERE state_code = :stateCode
-                   AND (CAST(:status AS text) IS NULL OR status = :status)
+                   AND (CAST(:status AS text) IS NULL AND status <> 'WITHDRAWN' OR status = :status)
                    AND (CAST(:stage AS text) IS NULL OR current_stage_code = :stage)
                    AND (CAST(:sroCode AS text) IS NULL OR sro_code = :sroCode)
                  ORDER BY initiated_at DESC
