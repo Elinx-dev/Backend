@@ -38,6 +38,12 @@ spring:
             enable: ${SLATE_SMTP_STARTTLS:false}
 
 slate:
+  security:
+    # true = local demo: demo secrets and mock endpoints are allowed (with a warning).
+    # Set SLATE_LOCAL_DEMO=false outside local use; startup then fails on any demo secret.
+    local-demo: ${SLATE_LOCAL_DEMO:true}
+  cors:
+    allowed-origins: ${SLATE_CORS_ORIGINS:http://localhost:*,http://127.0.0.1:*}
   jwt:
     secret: ${SLATE_JWT_SECRET:local-demo-only-secret-key-please-override-in-any-real-environment}
     access-token-minutes: ${SLATE_JWT_MINUTES:10}
@@ -75,9 +81,6 @@ slate:
     visit-slots: ${SLATE_VAO_VISIT_SLOTS:09:00,10:30,12:00,14:30,16:00}
   connectors:
     mode: ${SLATE_CONNECTORS_MODE:MOCK}
-    ec-base-url: ${SLATE_EC_BASE_URL:http://localhost:8080/mock/ec}
-    revenue-base-url: ${SLATE_REVENUE_BASE_URL:http://localhost:8080/mock/revenue}
-    aadhaar-base-url: ${SLATE_AADHAAR_BASE_URL:http://localhost:8080/mock/aadhaar}
   rules:
     blocking: ${SLATE_RULES_BLOCKING:false}
   chain:
@@ -92,13 +95,12 @@ slate:
       registration-peer: ${FABRIC_REGISTRATION_PEER:localhost:7051}
       revenue-peer: ${FABRIC_REVENUE_PEER:localhost:8051}
       survey-peer: ${FABRIC_SURVEY_PEER:localhost:9051}
-  storage:
-    # The demo stores documents on the local filesystem behind the same interface
-    # that MinIO/S3 implements in a deployed environment.
-    root: ${SLATE_STORAGE_ROOT:./storage}
 
 springdoc:
+  api-docs:
+    enabled: ${SLATE_API_DOCS_ENABLED:true}
   swagger-ui:
+    enabled: ${SLATE_API_DOCS_ENABLED:true}
     path: /swagger-ui.html
 
 management:
