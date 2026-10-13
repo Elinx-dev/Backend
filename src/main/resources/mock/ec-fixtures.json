@@ -518,5 +518,115 @@
         "remarks": "Final decree in partition suit O.S. No. 77/2017"
       }
     ]
+  },
+
+  "PERUNGUDI|501|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000201",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+
+  "PERUNGUDI|502|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000202",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+
+  "PERUNGUDI|503|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000203",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+
+  "PERUNGUDI|504|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000204",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+
+  "PERUNGUDI|505|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000205",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+
+  "PERUNGUDI|506|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000206",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+
+  "PERUNGUDI|507|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000207",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+
+  "PERUNGUDI|508|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000208",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+
+  "PERUNGUDI|509|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000209",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+
+  "PERUNGUDI|510|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/000210",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
   }
 }
