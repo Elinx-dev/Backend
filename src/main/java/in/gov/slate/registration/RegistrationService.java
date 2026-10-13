@@ -110,6 +110,9 @@ public class RegistrationService {
             token = minted.get(0);
             newProperties = childProperties(ctx.id());
         } else {
+            if (tokenLedger != null) {
+                tokenLedger.requireTransferAllowed(propertyId);
+            }
             applyRegisteredOwnership(ctx, propertyId, resultingOwners, today);
             byte[] evidenceRoot = Hashes.merkleRoot(List.of(deedHash, TokenService.ownerSetHash(resultingOwners),
                     Hashes.sha256(txnRef)));
@@ -424,6 +427,13 @@ public class RegistrationService {
         } catch (Exception e) {
             throw new IllegalStateException("Cannot serialise registration payload", e);
         }
+    }
+
+    private in.gov.slate.chain.TokenLedgerService tokenLedger;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setTokenLedger(in.gov.slate.chain.TokenLedgerService tokenLedger) {
+        this.tokenLedger = tokenLedger;
     }
 
     private in.gov.slate.chain.ChainService chain;

@@ -128,7 +128,8 @@ public class TokenService {
             jdbc.update("UPDATE core.property SET token_id = :tokenId WHERE id = :propertyId",
                     new MapSqlParameterSource().addValue("tokenId", tokenId).addValue("propertyId", propertyId));
             recordHistory(tokenId, 1, "MINT", transactionId, ownerHash, owners, evidenceRoot, null, state);
-            anchor(stateCode, tokenId, tokenRef, transactionId, state, "MINT");
+            anchor(stateCode, tokenId, tokenRef, transactionId, state, "MINT",
+                    tokenArgs(tokenId, 1, tokenRef, propertyId, propertyRefHash, owners, null, null));
             return tokenState(tokenId, "MINT");
         }
 
@@ -150,7 +151,8 @@ public class TokenService {
                 .addValue("evidenceRoot", evidenceRoot)
                 .addValue("prevState", prevState));
         recordHistory(tokenId, version, "UPDATE", transactionId, ownerHash, owners, evidenceRoot, prevState, state);
-        anchor(stateCode, tokenId, tokenRef, transactionId, state, "UPDATE");
+        anchor(stateCode, tokenId, tokenRef, transactionId, state, "UPDATE",
+                tokenArgs(tokenId, version, tokenRef, propertyId, propertyRefHash, owners, null, null));
         return tokenState(tokenId, "UPDATE");
     }
 
@@ -221,7 +223,10 @@ public class TokenService {
                         new MapSqlParameterSource().addValue("id", childTokenId)
                                 .addValue("status", event.approvalStatus()));
             }
-            anchor(stateCode, childTokenId, tokenRef, transactionId, state, "SPLIT");
+            anchor(stateCode, childTokenId, tokenRef, transactionId, state, "SPLIT",
+                    tokenArgs(childTokenId, 1, tokenRef, child.propertyId(), propertyRefHash, child.owners(),
+                            parentRows.isEmpty() ? null : (String) parentRows.get(0).get("token_ref"),
+                            subdivision ? event.actorRole() : "SURVEYOR"));
             minted.add(tokenState(childTokenId, "SPLIT"));
         }
 
@@ -254,10 +259,13 @@ public class TokenService {
                     : null;
             recordHistory(parentTokenId, version, "SUPERSEDE", transactionId,
                     emptyOwnerHash, List.of(), null, prevState, state, parentEvent);
-            if (subdivision) {
-                anchor(stateCode, parentTokenId, (String) parentRows.get(0).get("token_ref"), transactionId, state,
-                        "SUPERSEDE");
-            }
+            Map<String, Object> retire = new LinkedHashMap<>();
+            retire.put("version", version);
+            retire.put("status", subdivision ? "INACTIVE" : "SUPERSEDED");
+            retire.put("children", minted.stream().map(m -> String.valueOf(m.get("token_ref"))).toList());
+            retire.put("role", subdivision ? event.actorRole() : "SURVEYOR");
+            anchor(stateCode, parentTokenId, (String) parentRows.get(0).get("token_ref"), transactionId, state,
+                    "SUPERSEDE", retire);
         }
         jdbc.update("UPDATE core.property SET status = 'INACTIVE' WHERE id = :propertyId",
                 new MapSqlParameterSource("propertyId", parentPropertyId));
@@ -312,7 +320,11 @@ public class TokenService {
                     .addValue("status", event.approvalStatus()));
             recordHistory(tokenId, version, "ANNOTATE", transactionId, ownerHash, owners, evidence, prevState, state,
                     event);
-            anchor(stateCode, tokenId, tokenRef, transactionId, state, "ANNOTATE");
+            Map<String, Object> note = tokenArgs(tokenId, version, tokenRef, ((Number) child.get("property_id")).longValue(),
+                    (byte[]) child.get("property_ref_hash"), owners, null, event.actorRole());
+            note.put("action", event.actionCode());
+            note.put("decision", event.decision() == null ? "" : event.decision());
+            anchor(stateCode, tokenId, tokenRef, transactionId, state, "ANNOTATE", note);
             out.add(tokenState(tokenId, "ANNOTATE"));
         }
         return out;
@@ -393,11 +405,102 @@ public class TokenService {
     }
 
     private void anchor(String stateCode, long tokenId, String tokenRef, long transactionId, byte[] stateHash,
-                        String operation) {
+                        String operation, Map<String, Object> extra) {
+        Map<String, Object> args = new LinkedHashMap<>(extra);
+        args.put("tokenRef", tokenRef);
+        args.put("operation", operation);
+        args.put("stateHash", Hashes.hex(stateHash));
         chain.anchor(new ChainService.AnchorRequest(stateCode, "PROPERTY_TOKEN", "recordTokenState",
-                Map.of("tokenRef", tokenRef, "operation", operation, "stateHash", Hashes.hex(stateHash)),
-                transactionId, tokenId, null, stateHash, tokenRef));
+                args, transactionId, tokenId, null, stateHash, tokenRef));
         // chain.token_state_history is append-only (V11): the tx hash stays on chain.blockchain_transaction.
+    }
+
+    /** Pseudonymous on-ledger holder id: the owner's name never leaves SLATE's database. */
+    public static String holderHash(String tokenRef, String ownerName) {
+        return Hashes.hex(Hashes.sha256(tokenRef + "|" + ownerName.trim().toUpperCase()));
+    }
+
+    /**
+     * Fractional ownership as share units (10000 = 100%). Owners without a share, or shares that don't add up
+     * to 100, are split equally; rounding goes to the first owner so the units always total 10000.
+     */
+    public static Map<String, Integer> shareUnits(String tokenRef, List<Owner> owners) {
+        Map<String, Integer> units = new LinkedHashMap<>();
+        if (owners == null || owners.isEmpty()) {
+            return units;
+        }
+        BigDecimal total = owners.stream().map(o -> o.sharePct() == null ? BigDecimal.ZERO : o.sharePct())
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        boolean usePct = owners.stream().allMatch(o -> o.sharePct() != null && o.sharePct().signum() > 0)
+                && total.compareTo(new BigDecimal("100")) == 0;
+        int assigned = 0;
+        for (Owner o : owners) {
+            int u = usePct ? o.sharePct().multiply(new BigDecimal("100")).intValue() : TOTAL_UNITS / owners.size();
+            units.merge(holderHash(tokenRef, o.name()), u, Integer::sum);
+            assigned += u;
+        }
+        String first = units.keySet().iterator().next();
+        units.merge(first, TOTAL_UNITS - assigned, Integer::sum);
+        return units;
+    }
+
+    public static final int TOTAL_UNITS = 10000;
+
+    /**
+     * Ledger arguments for one token state, plus the off-chain NFT metadata document for it. The metadata
+     * (custody, share units, geo-location and survey details, encumbrances) is stored in chain.token_metadata;
+     * only its SHA-256 and the geo hash go on the ledger.
+     */
+    Map<String, Object> tokenArgs(long tokenId, int version, String tokenRef, long propertyId, byte[] propertyRefHash,
+                                  List<Owner> owners, String parentTokenRef, String role) {
+        Map<String, Integer> shares = shareUnits(tokenRef, owners);
+        var geoRows = jdbc.queryForList("""
+                SELECT p.survey_no, p.subdivision_no, p.extent_value, p.extent_unit, p.boundary_north,
+                       p.boundary_south, p.boundary_east, p.boundary_west,
+                       (SELECT rp.geometry_geojson::text FROM survey.resulting_parcel rp
+                         WHERE rp.child_property_id = p.id ORDER BY rp.id DESC LIMIT 1) AS geometry
+                  FROM core.property p WHERE p.id = :id
+                """, new MapSqlParameterSource("id", propertyId));
+        Map<String, Object> geo = new LinkedHashMap<>();
+        if (!geoRows.isEmpty()) {
+            geoRows.get(0).forEach((k, v) -> geo.put(k, v == null ? null : v.toString()));
+        }
+        byte[] geoHash = Hashes.sha256(json(geo));
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("standard", "SLATE-LAND-NFT/1");
+        meta.put("tokenRef", tokenRef);
+        meta.put("version", version);
+        meta.put("custody", "SLATE_REGISTRY_CUSTODY");
+        meta.put("propertyRefHash", Hashes.hex(propertyRefHash));
+        meta.put("ownerSetHash", Hashes.hex(ownerSetHash(owners == null ? List.of() : owners)));
+        meta.put("shareUnits", shares);
+        meta.put("totalUnits", TOTAL_UNITS);
+        meta.put("geo", geo);
+        meta.put("geoHash", Hashes.hex(geoHash));
+        meta.put("parentTokenRef", parentTokenRef);
+        meta.put("activeEncumbrances", jdbc.queryForObject("""
+                SELECT count(*) FROM chain.encumbrance WHERE token_id = :id AND status = 'ACTIVE'
+                """, new MapSqlParameterSource("id", tokenId), Long.class));
+        String metaJson = json(meta);
+        byte[] metadataHash = Hashes.sha256(metaJson);
+        jdbc.update("""
+                INSERT INTO chain.token_metadata (token_id, state_version, metadata_json, metadata_hash, geo_hash)
+                VALUES (:tokenId, :version, cast(:json AS jsonb), :hash, :geo)
+                ON CONFLICT (token_id, state_version) DO UPDATE SET metadata_json = EXCLUDED.metadata_json,
+                    metadata_hash = EXCLUDED.metadata_hash, geo_hash = EXCLUDED.geo_hash
+                """, new MapSqlParameterSource().addValue("tokenId", tokenId).addValue("version", version)
+                .addValue("json", metaJson).addValue("hash", metadataHash).addValue("geo", geoHash));
+        Map<String, Object> args = new LinkedHashMap<>();
+        args.put("version", version);
+        args.put("propertyRefHash", Hashes.hex(propertyRefHash));
+        args.put("metadataHash", Hashes.hex(metadataHash));
+        args.put("geoHash", Hashes.hex(geoHash));
+        args.put("shares", shares);
+        args.put("parentTokenRef", parentTokenRef == null ? "" : parentTokenRef);
+        if (role != null) {
+            args.put("role", role);
+        }
+        return args;
     }
 
     private String json(Object value) {
