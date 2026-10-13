@@ -88,7 +88,7 @@ Invoke-RestMethod -Method Put -ContentType "application/json" -Uri "http://local
 Invoke-RestMethod -Method Delete -Uri "http://localhost:8081/mock/token-rules?propertyRef=TN-CHN-00000009"
 ```
 
-A failed check blocks Register with HTTP 409.
+A failed check blocks Register with HTTP 409. The `/mock/**` endpoints only answer calls from the same machine (localhost) and only exist while `SLATE_CONNECTORS_MODE=MOCK`.
 
 ## APIs (login required)
 
