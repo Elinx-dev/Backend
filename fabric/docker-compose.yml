@@ -126,7 +126,11 @@ services:
     image: hyperledger/fabric-tools:2.5
     working_dir: /fabric
     entrypoint: ["bash", "-c", "sed 's/\\r$$//' scripts/setup.sh | bash -s"]
-    depends_on: [peer0.registration.slate.local, peer0.revenue.slate.local, peer0.survey.slate.local]
+    depends_on:
+      certs: {condition: service_completed_successfully}
+      peer0.registration.slate.local: {condition: service_started}
+      peer0.revenue.slate.local: {condition: service_started}
+      peer0.survey.slate.local: {condition: service_started}
     volumes: ["./:/fabric"]
     networks: [fabric]
 
