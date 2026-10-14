@@ -175,8 +175,7 @@ public class SurveyService {
         String measuredUnit = req.extentUnit() == null || req.extentUnit().isBlank()
                 ? recordedUnit : AreaUnits.code(req.extentUnit());
         BigDecimal measuredInRecordUnit = AreaUnits.convert(req.measuredExtent(), measuredUnit, recordedUnit);
-        List<Map<String, Object>> children = ctx.subdivisionAtRegistration()
-                ? registration.childProperties(ctx.id()) : List.of();
+        List<Map<String, Object>> children = registration.childProperties(ctx.id());
         if (!children.isEmpty()) {
             validateSubdivisionParcels(req, children, measuredUnit);
         }
@@ -255,7 +254,7 @@ public class SurveyService {
         out.put("routedTo", withinTolerance ? "VAO_VERIFICATION" : "SURVEY_CORRECTION_REVIEW");
         out.put("childTokens", childTokens);
 
-        if (withinTolerance && !children.isEmpty()) {
+        if (withinTolerance && ctx.subdivisionAtRegistration()) {
             TransactionContext reloaded = repository.load(txnRef, user.stateCode());
             out.put("status", workflow.apply(reloaded, "SUBMIT_SUBDIVISION_SURVEY", null, user));
             tokens.annotateChildren((String) ctx.transaction().get("state_code"), ctx.id(),
@@ -269,6 +268,9 @@ public class SurveyService {
             registration.createProposedMutation(reloaded, registrationId,
                     registration.resultingOwners(reloaded), submissionId);
             out.put("status", workflow.apply(reloaded, "SUBMIT_SURVEY", null, user));
+            tokens.annotateChildren((String) ctx.transaction().get("state_code"), ctx.id(),
+                    new TokenService.ChainEvent("SUBMIT_SURVEY", "SURVEYOR", user.id(), "APPROVED",
+                            "SURVEY_APPROVED", req.siteNotes()));
         } else {
             out.put("status", ctx.status());
             out.put("note", "Measured extent is outside tolerance; the submission is routed to survey correction "
