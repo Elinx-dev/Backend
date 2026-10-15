@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -23,8 +24,11 @@ public class TokenController {
     private final VerificationService verification;
     private final in.gov.slate.common.JurisdictionGuard guard;
 
+    private final TokenLedgerService ledger;
+
     public TokenController(NamedParameterJdbcTemplate jdbc, TokenService tokens, VerificationService verification,
-                           in.gov.slate.common.JurisdictionGuard guard) {
+                           in.gov.slate.common.JurisdictionGuard guard, TokenLedgerService ledger) {
+        this.ledger = ledger;
         this.guard = guard;
         this.jdbc = jdbc;
         this.tokens = tokens;
@@ -70,5 +74,44 @@ public class TokenController {
     @PostMapping("/{tokenRef}/verify")
     public Map<String, Object> verify(@PathVariable String tokenRef) {
         return verification.verifyToken(tokenRef);
+    }
+
+    /** The parcel NFT on the Fabric ledger next to SLATE's copy: holders, metadata, encumbrances, blocks. */
+    @GetMapping("/{tokenRef}/ledger")
+    public Map<String, Object> ledger(@PathVariable String tokenRef) {
+        return ledger.ledgerView(token(tokenRef));
+    }
+
+    @GetMapping("/{tokenRef}/transfer-check")
+    public Map<String, Object> transferCheck(@PathVariable String tokenRef) {
+        return ledger.transferCheckForToken(((Number) token(tokenRef).get("id")).longValue());
+    }
+
+    @GetMapping("/{tokenRef}/encumbrances")
+    public List<Map<String, Object>> encumbrances(@PathVariable String tokenRef) {
+        return ledger.encumbrances(((Number) token(tokenRef).get("id")).longValue());
+    }
+
+    @PostMapping("/{tokenRef}/encumbrances")
+    public Map<String, Object> addEncumbrance(@PathVariable String tokenRef,
+                                              @RequestBody TokenLedgerService.EncumbranceRequest request) {
+        return ledger.addEncumbrance(token(tokenRef), request, CurrentUser.require());
+    }
+
+    @PostMapping("/{tokenRef}/encumbrances/{encRef}/release")
+    public Map<String, Object> releaseEncumbrance(@PathVariable String tokenRef, @PathVariable String encRef,
+                                                  @RequestBody TokenLedgerService.ReleaseRequest request) {
+        return ledger.releaseEncumbrance(token(tokenRef), encRef, request, CurrentUser.require());
+    }
+
+    @PostMapping("/{tokenRef}/demo/double-sale")
+    public Map<String, Object> doubleSaleDemo(@PathVariable String tokenRef) {
+        return ledger.doubleSaleDemo(token(tokenRef));
+    }
+
+    @GetMapping("/metrics/summary")
+    public Map<String, Object> metrics() {
+        CurrentUser.require().requirePermission("TOKEN_READ");
+        return ledger.metrics();
     }
 }

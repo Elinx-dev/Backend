@@ -1,8 +1,10 @@
 package in.gov.slate.transaction;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -55,7 +57,8 @@ public class PartitionController {
         Map<String, Object> doc = partition.download(txnRef, documentId);
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType((String) doc.get("mime_type")))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + doc.get("file_name") + "\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.inline()
+                        .filename(String.valueOf(doc.get("file_name")), StandardCharsets.UTF_8).build().toString())
                 .body((byte[]) doc.get("content"));
     }
 }

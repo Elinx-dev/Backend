@@ -77,16 +77,13 @@ public class LineageService {
     private final JurisdictionGuard guard;
     private final AuditService audit;
     private final boolean chainEnabled;
-    private final boolean submitterConfigured;
 
     public LineageService(NamedParameterJdbcTemplate jdbc, JurisdictionGuard guard, AuditService audit,
-                          @Value("${slate.chain.enabled}") boolean chainEnabled,
-                          @Value("${slate.chain.submitter-private-key:}") String submitterKey) {
+                          @Value("${slate.chain.enabled}") boolean chainEnabled) {
         this.jdbc = jdbc;
         this.guard = guard;
         this.audit = audit;
         this.chainEnabled = chainEnabled;
-        this.submitterConfigured = submitterKey != null && !submitterKey.isBlank();
     }
 
     private ChainService chain;
@@ -170,7 +167,7 @@ public class LineageService {
         if (read) {
             chainInfo.put("connected", true);
             chainInfo.put("source", "BLOCKCHAIN_READ_BACK");
-            chainInfo.put("note", "Each token's latest state hash was checked against the PROPERTY_TOKEN contract; "
+            chainInfo.put("note", "Each token's latest state hash was checked against the slateland chaincode on the Fabric ledger; "
                     + "see onchain_status on every node.");
         }
         out.put("chain", chainInfo);
@@ -181,9 +178,7 @@ public class LineageService {
     }
 
     private Map<String, Object> chainStatus(List<Map<String, Object>> nodes) {
-        Boolean contract = jdbc.queryForObject(
-                "SELECT EXISTS (SELECT 1 FROM cfg.chain_contract WHERE active)", Map.of(), Boolean.class);
-        boolean connected = chainEnabled && submitterConfigured && Boolean.TRUE.equals(contract);
+        boolean connected = chainEnabled && chain != null && chain.connected(null);
         Map<String, Long> anchors = new LinkedHashMap<>();
         nodes.stream().map(n -> n.get("anchor_status")).filter(java.util.Objects::nonNull)
                 .forEach(s -> anchors.merge(s.toString(), 1L, Long::sum));
@@ -193,7 +188,7 @@ public class LineageService {
         chain.put("anchorStatusCounts", anchors);
         chain.put("note", connected
                 ? "Each token state is anchored on the configured chain; anchor_tx_hash identifies the block entry."
-                : "No blockchain node or contract is configured. Lineage comes from SLATE's chain records "
+                : "The Fabric ledger is not connected. Lineage comes from SLATE's chain records "
                   + "(tokens, parent tokens and blocks); anchors are SKIPPED until a chain is connected.");
         return chain;
     }

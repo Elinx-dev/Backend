@@ -1,0 +1,101 @@
+# Channel "slate": one Raft orderer and three peer organisations. Majority (2 of 3) endorsement.
+Organizations:
+  - &OrdererOrg
+    Name: OrdererMSP
+    ID: OrdererMSP
+    MSPDir: organizations/ordererOrganizations/slate.local/msp
+    Policies:
+      Readers: {Type: Signature, Rule: "OR('OrdererMSP.member')"}
+      Writers: {Type: Signature, Rule: "OR('OrdererMSP.member')"}
+      Admins: {Type: Signature, Rule: "OR('OrdererMSP.admin')"}
+    OrdererEndpoints:
+      - orderer.slate.local:7050
+  - &Registration
+    Name: RegistrationMSP
+    ID: RegistrationMSP
+    MSPDir: organizations/peerOrganizations/registration.slate.local/msp
+    Policies:
+      Readers: {Type: Signature, Rule: "OR('RegistrationMSP.admin', 'RegistrationMSP.peer', 'RegistrationMSP.client')"}
+      Writers: {Type: Signature, Rule: "OR('RegistrationMSP.admin', 'RegistrationMSP.client')"}
+      Admins: {Type: Signature, Rule: "OR('RegistrationMSP.admin')"}
+      Endorsement: {Type: Signature, Rule: "OR('RegistrationMSP.peer')"}
+    AnchorPeers:
+      - {Host: peer0.registration.slate.local, Port: 7051}
+  - &Revenue
+    Name: RevenueMSP
+    ID: RevenueMSP
+    MSPDir: organizations/peerOrganizations/revenue.slate.local/msp
+    Policies:
+      Readers: {Type: Signature, Rule: "OR('RevenueMSP.admin', 'RevenueMSP.peer', 'RevenueMSP.client')"}
+      Writers: {Type: Signature, Rule: "OR('RevenueMSP.admin', 'RevenueMSP.client')"}
+      Admins: {Type: Signature, Rule: "OR('RevenueMSP.admin')"}
+      Endorsement: {Type: Signature, Rule: "OR('RevenueMSP.peer')"}
+    AnchorPeers:
+      - {Host: peer0.revenue.slate.local, Port: 7051}
+  - &Survey
+    Name: SurveyMSP
+    ID: SurveyMSP
+    MSPDir: organizations/peerOrganizations/survey.slate.local/msp
+    Policies:
+      Readers: {Type: Signature, Rule: "OR('SurveyMSP.admin', 'SurveyMSP.peer', 'SurveyMSP.client')"}
+      Writers: {Type: Signature, Rule: "OR('SurveyMSP.admin', 'SurveyMSP.client')"}
+      Admins: {Type: Signature, Rule: "OR('SurveyMSP.admin')"}
+      Endorsement: {Type: Signature, Rule: "OR('SurveyMSP.peer')"}
+    AnchorPeers:
+      - {Host: peer0.survey.slate.local, Port: 7051}
+
+Capabilities:
+  Channel: &ChannelCapabilities {V2_0: true}
+  Orderer: &OrdererCapabilities {V2_0: true}
+  Application: &ApplicationCapabilities {V2_5: true}
+
+Application: &ApplicationDefaults
+  Organizations:
+  Policies:
+    Readers: {Type: ImplicitMeta, Rule: "ANY Readers"}
+    Writers: {Type: ImplicitMeta, Rule: "ANY Writers"}
+    Admins: {Type: ImplicitMeta, Rule: "MAJORITY Admins"}
+    LifecycleEndorsement: {Type: ImplicitMeta, Rule: "MAJORITY Endorsement"}
+    Endorsement: {Type: ImplicitMeta, Rule: "MAJORITY Endorsement"}
+  Capabilities: *ApplicationCapabilities
+
+Orderer: &OrdererDefaults
+  OrdererType: etcdraft
+  Addresses:
+    - orderer.slate.local:7050
+  EtcdRaft:
+    Consenters:
+      - Host: orderer.slate.local
+        Port: 7050
+        ClientTLSCert: organizations/ordererOrganizations/slate.local/orderers/orderer.slate.local/tls/server.crt
+        ServerTLSCert: organizations/ordererOrganizations/slate.local/orderers/orderer.slate.local/tls/server.crt
+  BatchTimeout: 1s
+  BatchSize:
+    MaxMessageCount: 10
+    AbsoluteMaxBytes: 99 MB
+    PreferredMaxBytes: 512 KB
+  Organizations:
+  Policies:
+    Readers: {Type: ImplicitMeta, Rule: "ANY Readers"}
+    Writers: {Type: ImplicitMeta, Rule: "ANY Writers"}
+    Admins: {Type: ImplicitMeta, Rule: "MAJORITY Admins"}
+    BlockValidation: {Type: ImplicitMeta, Rule: "ANY Writers"}
+
+Channel: &ChannelDefaults
+  Policies:
+    Readers: {Type: ImplicitMeta, Rule: "ANY Readers"}
+    Writers: {Type: ImplicitMeta, Rule: "ANY Writers"}
+    Admins: {Type: ImplicitMeta, Rule: "MAJORITY Admins"}
+  Capabilities: *ChannelCapabilities
+
+Profiles:
+  SlateChannel:
+    <<: *ChannelDefaults
+    Orderer:
+      <<: *OrdererDefaults
+      Organizations: [*OrdererOrg]
+      Capabilities: *OrdererCapabilities
+    Application:
+      <<: *ApplicationDefaults
+      Organizations: [*Registration, *Revenue, *Survey]
+      Capabilities: *ApplicationCapabilities

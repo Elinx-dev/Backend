@@ -46,6 +46,9 @@ public class PaymentService {
         if (ctx.totalPayable() == null) {
             throw ApiException.conflict("Fees have not been calculated for " + txnRef);
         }
+        if (ctx.totalPayable().signum() == 0 && (input.amount() == null || input.amount().signum() == 0)) {
+            return summary(txnRef);
+        }
         if (input.amount() == null || input.amount().signum() <= 0) {
             throw ApiException.badRequest("Payment amount must be positive");
         }

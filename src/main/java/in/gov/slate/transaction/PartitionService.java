@@ -404,8 +404,8 @@ public class PartitionService {
         parcels(ctx).forEach(p -> parcels.put(parcelKey(p.get("survey_no"), p.get("subdivision_no")), p));
 
         List<ScheduleInput> input = schedules == null ? List.of() : schedules;
-        if (input.isEmpty()) {
-            throw ApiException.badRequest("Add at least one schedule");
+        if (input.size() < 2) {
+            throw ApiException.badRequest("Add at least two schedules; each schedule becomes a new property");
         }
         Set<String> labels = new HashSet<>();
         Map<String, BigDecimal> allotted = new LinkedHashMap<>();
@@ -590,8 +590,11 @@ public class PartitionService {
         }
         try {
             byte[] content = file.getBytes();
+            if (!contentMatches(mime, content)) {
+                throw ApiException.badRequest("The file content is not a valid PDF, JPG or PNG");
+            }
             byte[] sha = MessageDigest.getInstance("SHA-256").digest(content);
-            String name = file.getOriginalFilename() == null ? "certificate" : file.getOriginalFilename();
+            String name = safeFileName(file.getOriginalFilename());
             Long id = jdbc.queryForObject("""
                     INSERT INTO core.document (state_code, transaction_id, document_type_code, file_name, mime_type,
                         size_bytes, storage_bucket, storage_key, sha256, uploaded_by)
@@ -627,6 +630,39 @@ public class PartitionService {
             throw ApiException.notFound("Document " + documentId);
         }
         return rows.get(0);
+    }
+
+    /** Checks the file's leading bytes so a renamed executable or HTML file is not accepted as a certificate. */
+    static boolean contentMatches(String mime, byte[] content) {
+        return switch (mime) {
+            case "application/pdf" -> startsWith(content, 0x25, 0x50, 0x44, 0x46, 0x2D);
+            case "image/png" -> startsWith(content, 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A);
+            case "image/jpeg" -> startsWith(content, 0xFF, 0xD8, 0xFF);
+            default -> false;
+        };
+    }
+
+    private static boolean startsWith(byte[] content, int... magic) {
+        if (content == null || content.length < magic.length) {
+            return false;
+        }
+        for (int i = 0; i < magic.length; i++) {
+            if ((content[i] & 0xFF) != magic[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Keeps only the base name with safe characters, so stored names cannot carry paths or header tricks. */
+    static String safeFileName(String original) {
+        String name = original == null ? "" : original;
+        name = name.substring(Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\')) + 1);
+        name = name.replaceAll("[^A-Za-z0-9._ -]", "_").trim();
+        if (name.isEmpty() || name.chars().allMatch(c -> c == '.')) {
+            return "certificate";
+        }
+        return name.length() > 120 ? name.substring(name.length() - 120) : name;
     }
 
     private Set<Long> documentIds(long txnId) {

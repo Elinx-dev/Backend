@@ -769,5 +769,362 @@
     "sourceReference": "TN-REVENUE-API/PATTA/PER/1210",
     "district": "CHN",
     "taluk": "SHOL"
+  },
+
+  "PERUNGUDI|601|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1301",
+    "village": "PERUNGUDI",
+    "surveyNo": "601",
+    "subdivisionNo": "1",
+    "landType": "NATHAM",
+    "classification": "HOUSE_SITE",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Kumaravel Natesan",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1301",
+    "district": "CHN",
+    "taluk": "SHOL"
+  },
+
+  "PERUNGUDI|602|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1302",
+    "village": "PERUNGUDI",
+    "surveyNo": "602",
+    "subdivisionNo": "1",
+    "landType": "NATHAM",
+    "classification": "HOUSE_SITE",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Ganesan Ramasamy",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      },
+      {
+        "name": "Vijaya Ganesan",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1302",
+    "district": "CHN",
+    "taluk": "SHOL"
+  },
+
+  "PERUNGUDI|603|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1303",
+    "village": "PERUNGUDI",
+    "surveyNo": "603",
+    "subdivisionNo": "1",
+    "landType": "NATHAM",
+    "classification": "HOUSE_SITE",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Mohan Sundaram",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1303",
+    "district": "CHN",
+    "taluk": "SHOL"
+  },
+
+  "PERUNGUDI|604|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1304",
+    "village": "PERUNGUDI",
+    "surveyNo": "604",
+    "subdivisionNo": "1",
+    "landType": "NATHAM",
+    "classification": "HOUSE_SITE",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Padmanabhan Iyer",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1304",
+    "district": "CHN",
+    "taluk": "SHOL"
+  },
+
+  "PERUNGUDI|605|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1305",
+    "village": "PERUNGUDI",
+    "surveyNo": "605",
+    "subdivisionNo": "1",
+    "landType": "NATHAM",
+    "classification": "HOUSE_SITE",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Ramalingam Chettiar",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1305",
+    "district": "CHN",
+    "taluk": "SHOL"
+  },
+
+  "PERUNGUDI|606|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1306",
+    "village": "PERUNGUDI",
+    "surveyNo": "606",
+    "subdivisionNo": "1",
+    "landType": "NATHAM",
+    "classification": "HOUSE_SITE",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Sivakumar Rajan",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1306",
+    "district": "CHN",
+    "taluk": "SHOL"
+  },
+
+  "PERUNGUDI|607|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1307",
+    "village": "PERUNGUDI",
+    "surveyNo": "607",
+    "subdivisionNo": "1",
+    "landType": "NATHAM",
+    "classification": "HOUSE_SITE",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Duraisamy Pandian",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1307",
+    "district": "CHN",
+    "taluk": "SHOL"
+  },
+
+  "PERUNGUDI|608|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1308",
+    "village": "PERUNGUDI",
+    "surveyNo": "608",
+    "subdivisionNo": "1",
+    "landType": "NATHAM",
+    "classification": "HOUSE_SITE",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Ilango Murugesan",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1308",
+    "district": "CHN",
+    "taluk": "SHOL"
+  },
+
+  "PERUNGUDI|609|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1309",
+    "village": "PERUNGUDI",
+    "surveyNo": "609",
+    "subdivisionNo": "1",
+    "landType": "NATHAM",
+    "classification": "HOUSE_SITE",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Thangaraj Velusamy",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1309",
+    "district": "CHN",
+    "taluk": "SHOL"
+  },
+
+  "PERUNGUDI|610|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1310",
+    "village": "PERUNGUDI",
+    "surveyNo": "610",
+    "subdivisionNo": "1",
+    "landType": "NATHAM",
+    "classification": "HOUSE_SITE",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Sankaran Pillai",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1310",
+    "district": "CHN",
+    "taluk": "SHOL"
+  },
+
+  "PERUNGUDI|611|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1311",
+    "village": "PERUNGUDI",
+    "surveyNo": "611",
+    "subdivisionNo": "1",
+    "landType": "NATHAM",
+    "classification": "HOUSE_SITE",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Chandrasekar Bose",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1311",
+    "district": "CHN",
+    "taluk": "SHOL"
+  },
+
+  "PERUNGUDI|612|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1312",
+    "village": "PERUNGUDI",
+    "surveyNo": "612",
+    "subdivisionNo": "1",
+    "landType": "NATHAM",
+    "classification": "HOUSE_SITE",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Karuppiah Thevar",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1312",
+    "district": "CHN",
+    "taluk": "SHOL"
+  },
+
+  "PERUNGUDI|613|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1313",
+    "village": "PERUNGUDI",
+    "surveyNo": "613",
+    "subdivisionNo": "1",
+    "landType": "NATHAM",
+    "classification": "HOUSE_SITE",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Venkatachalam Gounder",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1313",
+    "district": "CHN",
+    "taluk": "SHOL"
+  },
+
+  "PERUNGUDI|614|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1314",
+    "village": "PERUNGUDI",
+    "surveyNo": "614",
+    "subdivisionNo": "1",
+    "landType": "NATHAM",
+    "classification": "HOUSE_SITE",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Subramani Naidu",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      },
+      {
+        "name": "Rukmani Subramani",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1314",
+    "district": "CHN",
+    "taluk": "SHOL"
+  },
+
+  "PERUNGUDI|615|1": {
+    "responseStatus": "FOUND",
+    "recordNumber": "PATTA-PER-1315",
+    "village": "PERUNGUDI",
+    "surveyNo": "615",
+    "subdivisionNo": "1",
+    "landType": "NATHAM",
+    "classification": "HOUSE_SITE",
+    "extent": 2400,
+    "extentUnit": "SQ_FT",
+    "owners": [
+      {
+        "name": "Palanisamy Raju",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }
+    ],
+    "sourceReference": "TN-REVENUE-API/PATTA/PER/1315",
+    "district": "CHN",
+    "taluk": "SHOL"
   }
 }
