@@ -1,8 +1,8 @@
 // slateland: SLATE land-parcel token chaincode for the local permissioned Fabric network.
 //
-// Each land parcel is one non-fungible token (tokenRef) held in registry custody. Ownership is
-// split into fractional share units (10000 units = 100%) held by pseudonymous holder ids
-// (hashes); no names or personal data are stored on the ledger. Deeds, geo-location and the
+// Each land parcel is one non-fungible token (tokenRef) held in registry custody. Its current
+// owners are listed as pseudonymous holder ids (hashes); no names or personal data are stored
+// on the ledger. Deeds, geo-location and the
 // full metadata JSON are anchored as SHA-256 hashes. Encumbrances (mortgage, lease, court
 // attachment) block transfers while active. Every state change carries the expected version,
 // so a second sale of the same parcel version (double sale) is rejected.
@@ -23,7 +23,6 @@ import (
 )
 
 const (
-	TotalUnits      = 10000
 	Custodian       = "SLATE_REGISTRY_CUSTODY"
 	RegistrationMSP = "RegistrationMSP"
 	RevenueMSP      = "RevenueMSP"
@@ -40,7 +39,7 @@ type Parcel struct {
 	MetadataHash    string         `json:"metadataHash"`
 	GeoHash         string         `json:"geoHash,omitempty"`
 	Custodian       string         `json:"custodian"`
-	Shares          map[string]int `json:"shares"`
+	Holders         []string       `json:"holders"`
 	ParentTokenRef  string         `json:"parentTokenRef,omitempty"`
 	ChildTokenRefs  []string       `json:"childTokenRefs,omitempty"`
 	LastDeedNo      string         `json:"lastDeedNo,omitempty"`
@@ -89,8 +88,6 @@ func (c *Chaincode) Invoke(stub shim.ChaincodeStubInterface) *pb.Response {
 		out, err = mintParcel(stub, args)
 	case "TransferParcel":
 		out, err = transferParcel(stub, args)
-	case "TransferShares":
-		out, err = transferShares(stub, args)
 	case "RetireParcel":
 		out, err = retireParcel(stub, args)
 	case "Annotate":
@@ -234,25 +231,22 @@ func putParcel(stub shim.ChaincodeStubInterface, p *Parcel, op, role, org string
 	return raw, nil
 }
 
-func parseShares(s string) (map[string]int, error) {
-	shares := map[string]int{}
-	if s == "" {
-		return shares, nil
+func parseHolders(s string) ([]string, error) {
+	holders := []string{}
+	if s == "" || s == "null" {
+		return holders, nil
 	}
-	if err := json.Unmarshal([]byte(s), &shares); err != nil {
-		return nil, fmt.Errorf("shares must be a JSON object {holderHash: units}: %v", err)
+	var raw []string
+	if err := json.Unmarshal([]byte(s), &raw); err != nil {
+		return nil, fmt.Errorf("holders must be a JSON array of holder ids: %v", err)
 	}
-	total := 0
-	for h, u := range shares {
-		if h == "" || u <= 0 {
-			return nil, fmt.Errorf("INVALID_SHARES: every holder needs a positive unit count")
+	for _, h := range raw {
+		if h == "" {
+			return nil, fmt.Errorf("INVALID_HOLDERS: holder id must not be empty")
 		}
-		total += u
+		holders = appendUnique(holders, h)
 	}
-	if len(shares) > 0 && total != TotalUnits {
-		return nil, fmt.Errorf("INVALID_SHARES: share units total %d, must be %d", total, TotalUnits)
-	}
-	return shares, nil
+	return holders, nil
 }
 
 func checkVersion(p *Parcel, expected string) error {
@@ -279,9 +273,9 @@ func transferBlockers(p *Parcel) []string {
 
 // ---- transactions
 
-// MintParcel(tokenRef, version, propertyRefHash, stateHash, metadataHash, geoHash, sharesJSON, parentTokenRef)
+// MintParcel(tokenRef, version, propertyRefHash, stateHash, metadataHash, geoHash, holdersJSON, parentTokenRef)
 func mintParcel(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
-	if err := need(args, 8, "tokenRef, version, propertyRefHash, stateHash, metadataHash, geoHash, sharesJSON, parentTokenRef"); err != nil {
+	if err := need(args, 8, "tokenRef, version, propertyRefHash, stateHash, metadataHash, geoHash, holdersJSON, parentTokenRef"); err != nil {
 		return nil, err
 	}
 	org, err := requireOrg(stub, RegistrationMSP, SurveyMSP)
@@ -299,12 +293,12 @@ func mintParcel(stub shim.ChaincodeStubInterface, args []string) ([]byte, error)
 	if err != nil || version < 1 {
 		return nil, fmt.Errorf("version must be >= 1")
 	}
-	shares, err := parseShares(args[6])
+	holders, err := parseHolders(args[6])
 	if err != nil {
 		return nil, err
 	}
 	p := &Parcel{TokenRef: args[0], Version: version, PropertyRefHash: args[2], StateHash: args[3],
-		MetadataHash: args[4], GeoHash: args[5], Shares: shares, ParentTokenRef: args[7],
+		MetadataHash: args[4], GeoHash: args[5], Holders: holders, ParentTokenRef: args[7],
 		Status: "ACTIVE", Custodian: Custodian}
 	if p.ParentTokenRef != "" {
 		parent, err := getParcel(stub, p.ParentTokenRef)
@@ -321,9 +315,9 @@ func mintParcel(stub shim.ChaincodeStubInterface, args []string) ([]byte, error)
 	return putParcel(stub, p, "MINT", "", org)
 }
 
-// TransferParcel(tokenRef, expectedVersion, stateHash, metadataHash, geoHash, sharesJSON, deedNo)
+// TransferParcel(tokenRef, expectedVersion, stateHash, metadataHash, geoHash, holdersJSON, deedNo)
 func transferParcel(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
-	if err := need(args, 7, "tokenRef, expectedVersion, stateHash, metadataHash, geoHash, sharesJSON, deedNo"); err != nil {
+	if err := need(args, 7, "tokenRef, expectedVersion, stateHash, metadataHash, geoHash, holdersJSON, deedNo"); err != nil {
 		return nil, err
 	}
 	org, err := requireOrg(stub, RegistrationMSP)
@@ -340,52 +334,16 @@ func transferParcel(stub shim.ChaincodeStubInterface, args []string) ([]byte, er
 	if reasons := transferBlockers(p); len(reasons) > 0 {
 		return nil, fmt.Errorf("TRANSFER_BLOCKED: %s", strings.Join(reasons, "; "))
 	}
-	shares, err := parseShares(args[5])
+	holders, err := parseHolders(args[5])
 	if err != nil {
 		return nil, err
 	}
 	p.Version++
-	p.StateHash, p.MetadataHash, p.Shares, p.LastDeedNo = args[2], args[3], shares, args[6]
+	p.StateHash, p.MetadataHash, p.Holders, p.LastDeedNo = args[2], args[3], holders, args[6]
 	if args[4] != "" {
 		p.GeoHash = args[4]
 	}
 	return putParcel(stub, p, "TRANSFER", "REGISTRATION_OFFICER", org)
-}
-
-// TransferShares(tokenRef, expectedVersion, fromHolder, toHolder, units, stateHash)
-func transferShares(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
-	if err := need(args, 6, "tokenRef, expectedVersion, fromHolder, toHolder, units, stateHash"); err != nil {
-		return nil, err
-	}
-	org, err := requireOrg(stub, RegistrationMSP)
-	if err != nil {
-		return nil, err
-	}
-	p, err := mustParcel(stub, args[0])
-	if err != nil {
-		return nil, err
-	}
-	if err := checkVersion(p, args[1]); err != nil {
-		return nil, err
-	}
-	if reasons := transferBlockers(p); len(reasons) > 0 {
-		return nil, fmt.Errorf("TRANSFER_BLOCKED: %s", strings.Join(reasons, "; "))
-	}
-	units, err := strconv.Atoi(args[4])
-	if err != nil || units <= 0 {
-		return nil, fmt.Errorf("units must be positive")
-	}
-	if p.Shares[args[2]] < units {
-		return nil, fmt.Errorf("INSUFFICIENT_SHARES: holder has %d units, tried to move %d", p.Shares[args[2]], units)
-	}
-	p.Shares[args[2]] -= units
-	if p.Shares[args[2]] == 0 {
-		delete(p.Shares, args[2])
-	}
-	p.Shares[args[3]] += units
-	p.Version++
-	p.StateHash = args[5]
-	return putParcel(stub, p, "SHARE_TRANSFER", "REGISTRATION_OFFICER", org)
 }
 
 // RetireParcel(tokenRef, expectedVersion, stateHash, status, childTokenRefsJSON, role)

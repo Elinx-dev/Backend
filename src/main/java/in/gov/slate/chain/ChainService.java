@@ -178,7 +178,7 @@ public class ChainService {
                 case "MINT", "SPLIT" -> new Call(org == Org.SURVEY ? Org.SURVEY : Org.REGISTRATION, "MintParcel",
                         mintArgs(a));
                 case "UPDATE" -> new Call(Org.REGISTRATION, "TransferParcel", new String[]{s(a.get("tokenRef")), prev,
-                        s(a.get("stateHash")), s(a.get("metadataHash")), s(a.get("geoHash")), json(a.get("shares")),
+                        s(a.get("stateHash")), s(a.get("metadataHash")), s(a.get("geoHash")), json(a.get("holders")),
                         s(a.get("deedNo"))});
                 case "SUPERSEDE" -> new Call(org == Org.SURVEY ? Org.SURVEY : Org.REGISTRATION, "RetireParcel",
                         new String[]{s(a.get("tokenRef")), prev, s(a.get("stateHash")), s(a.get("status")),
@@ -194,7 +194,7 @@ public class ChainService {
     private String[] mintArgs(Map<String, Object> a) {
         return new String[]{s(a.get("tokenRef")), s(a.get("version")).isEmpty() ? "1" : s(a.get("version")),
                 s(a.get("propertyRefHash")), s(a.get("stateHash")), s(a.get("metadataHash")), s(a.get("geoHash")),
-                json(a.get("shares")), s(a.get("parentTokenRef"))};
+                json(a.get("holders")), s(a.get("parentTokenRef"))};
     }
 
     /** A token minted while no ledger was connected is minted on its first later transfer. */

@@ -50,7 +50,7 @@ Only hashes and pseudonymous ids. Names, Aadhaar, PAN, extent and boundaries sta
 | Deed registered | `RecordDeed` | Registration |
 
 Reads: `ReadParcel`, `HasState`, `DeedOf`, `Encumbrances`, `History`, `CanTransfer`.
-Transfer is blocked while any encumbrance is active. Fractional ownership is 10,000 share units per parcel.
+Transfer is blocked while any encumbrance is active. Each parcel lists its current owners as pseudonymous holder ids; there are no share units.
 
 ## Test each node
 
@@ -92,7 +92,7 @@ A failed check blocks Register with HTTP 409. The `/mock/**` endpoints only answ
 
 ## APIs (login required)
 
-- `GET /api/tokens/{tokenRef}/ledger`: NFT on ledger vs SLATE, shares, metadata, encumbrances, ledger history, integrity
+- `GET /api/tokens/{tokenRef}/ledger`: NFT on ledger vs SLATE, holders, metadata, encumbrances, ledger history, integrity
 - `GET /api/tokens/{tokenRef}/transfer-check`
 - `GET|POST /api/tokens/{tokenRef}/encumbrances`, `POST /api/tokens/{tokenRef}/encumbrances/{encRef}/release`
 - `POST /api/tokens/{tokenRef}/demo/double-sale`

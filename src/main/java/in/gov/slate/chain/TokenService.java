@@ -420,40 +420,22 @@ public class TokenService {
         return Hashes.hex(Hashes.sha256(tokenRef + "|" + ownerName.trim().toUpperCase()));
     }
 
-    /**
-     * Fractional ownership as share units (10000 = 100%). Owners without a share, or shares that don't add up
-     * to 100, are split equally; rounding goes to the first owner so the units always total 10000.
-     */
-    public static Map<String, Integer> shareUnits(String tokenRef, List<Owner> owners) {
-        Map<String, Integer> units = new LinkedHashMap<>();
-        if (owners == null || owners.isEmpty()) {
-            return units;
+    /** The token's current owners on the ledger: one pseudonymous holder id per owner, no shares or units. */
+    public static List<String> holders(String tokenRef, List<Owner> owners) {
+        if (owners == null) {
+            return List.of();
         }
-        BigDecimal total = owners.stream().map(o -> o.sharePct() == null ? BigDecimal.ZERO : o.sharePct())
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        boolean usePct = owners.stream().allMatch(o -> o.sharePct() != null && o.sharePct().signum() > 0)
-                && total.compareTo(new BigDecimal("100")) == 0;
-        int assigned = 0;
-        for (Owner o : owners) {
-            int u = usePct ? o.sharePct().multiply(new BigDecimal("100")).intValue() : TOTAL_UNITS / owners.size();
-            units.merge(holderHash(tokenRef, o.name()), u, Integer::sum);
-            assigned += u;
-        }
-        String first = units.keySet().iterator().next();
-        units.merge(first, TOTAL_UNITS - assigned, Integer::sum);
-        return units;
+        return owners.stream().map(o -> holderHash(tokenRef, o.name())).distinct().toList();
     }
-
-    public static final int TOTAL_UNITS = 10000;
 
     /**
      * Ledger arguments for one token state, plus the off-chain NFT metadata document for it. The metadata
-     * (custody, share units, geo-location and survey details, encumbrances) is stored in chain.token_metadata;
+     * (custody, holders, geo-location and survey details, encumbrances) is stored in chain.token_metadata;
      * only its SHA-256 and the geo hash go on the ledger.
      */
     Map<String, Object> tokenArgs(long tokenId, int version, String tokenRef, long propertyId, byte[] propertyRefHash,
                                   List<Owner> owners, String parentTokenRef, String role) {
-        Map<String, Integer> shares = shareUnits(tokenRef, owners);
+        List<String> holders = holders(tokenRef, owners);
         var geoRows = jdbc.queryForList("""
                 SELECT p.survey_no, p.subdivision_no, p.extent_value, p.extent_unit, p.boundary_north,
                        p.boundary_south, p.boundary_east, p.boundary_west,
@@ -473,8 +455,7 @@ public class TokenService {
         meta.put("custody", "SLATE_REGISTRY_CUSTODY");
         meta.put("propertyRefHash", Hashes.hex(propertyRefHash));
         meta.put("ownerSetHash", Hashes.hex(ownerSetHash(owners == null ? List.of() : owners)));
-        meta.put("shareUnits", shares);
-        meta.put("totalUnits", TOTAL_UNITS);
+        meta.put("holders", holders);
         meta.put("geo", geo);
         meta.put("geoHash", Hashes.hex(geoHash));
         meta.put("parentTokenRef", parentTokenRef);
@@ -495,7 +476,7 @@ public class TokenService {
         args.put("propertyRefHash", Hashes.hex(propertyRefHash));
         args.put("metadataHash", Hashes.hex(metadataHash));
         args.put("geoHash", Hashes.hex(geoHash));
-        args.put("shares", shares);
+        args.put("holders", holders);
         args.put("parentTokenRef", parentTokenRef == null ? "" : parentTokenRef);
         if (role != null) {
             args.put("role", role);

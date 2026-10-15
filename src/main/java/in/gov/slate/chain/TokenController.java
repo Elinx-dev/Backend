@@ -76,7 +76,7 @@ public class TokenController {
         return verification.verifyToken(tokenRef);
     }
 
-    /** The parcel NFT on the Fabric ledger next to SLATE's copy: shares, metadata, encumbrances, blocks. */
+    /** The parcel NFT on the Fabric ledger next to SLATE's copy: holders, metadata, encumbrances, blocks. */
     @GetMapping("/{tokenRef}/ledger")
     public Map<String, Object> ledger(@PathVariable String tokenRef) {
         return ledger.ledgerView(token(tokenRef));

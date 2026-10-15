@@ -326,7 +326,7 @@ public class TokenLedgerService {
         out.put("attemptedExpectedVersion", staleVersion);
         try {
             var r = chain.ledger().submit(Org.REGISTRATION, "TransferParcel", tokenRef, String.valueOf(staleVersion),
-                    "0xdemo", "0xdemo", "", "{\"DEMO_BUYER\":10000}", "DEMO-DOUBLE-SALE");
+                    "0xdemo", "0xdemo", "", "[\"DEMO_BUYER\"]", "DEMO-DOUBLE-SALE");
             out.put("rejected", false);
             out.put("txId", r.txId());
         } catch (FabricLedger.ChaincodeRejected e) {
