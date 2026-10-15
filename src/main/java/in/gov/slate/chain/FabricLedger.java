@@ -175,7 +175,7 @@ public class FabricLedger {
     private RuntimeException classify(GatewayException e) {
         String detail = describe(e);
         for (String code : List.of("DOUBLE_SPEND", "TRANSFER_BLOCKED", "ACCESS_DENIED", "DUPLICATE_", "INVALID_",
-                "NOT_FOUND", "DEED_EXISTS", "ALREADY_RELEASED", "INSUFFICIENT_SHARES", "expected ")) {
+                "NOT_FOUND", "DEED_EXISTS", "ALREADY_RELEASED", "expected ")) {
             if (detail.contains(code)) {
                 return new ChaincodeRejected(detail);
             }

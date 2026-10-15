@@ -75,7 +75,7 @@ public class SurveyService {
                               List<OwnerShare> owners, Map<String, Object> geometryGeoJson,
                               String officialSubdivisionNo, String propertyRef, String surveyNo,
                               String boundaryNorth, String boundarySouth, String boundaryEast,
-                              String boundaryWest) {
+                              String boundaryWest, List<SegmentInput> segments) {
     }
 
     public record OwnerShare(String name, BigDecimal sharePct) {
@@ -175,8 +175,7 @@ public class SurveyService {
         String measuredUnit = req.extentUnit() == null || req.extentUnit().isBlank()
                 ? recordedUnit : AreaUnits.code(req.extentUnit());
         BigDecimal measuredInRecordUnit = AreaUnits.convert(req.measuredExtent(), measuredUnit, recordedUnit);
-        List<Map<String, Object>> children = ctx.subdivisionAtRegistration()
-                ? registration.childProperties(ctx.id()) : List.of();
+        List<Map<String, Object>> children = registration.childProperties(ctx.id());
         if (!children.isEmpty()) {
             validateSubdivisionParcels(req, children, measuredUnit);
         }
@@ -185,7 +184,8 @@ public class SurveyService {
                 .divide(recordedExtent, 6, RoundingMode.HALF_UP).multiply(HUNDRED)
                 .setScale(4, RoundingMode.HALF_UP)
                 .min(MAX_VARIANCE_PCT);
-        boolean withinTolerance = variance.compareTo(defaultTolerancePct) <= 0;
+        // The Surveyor's measurement is final: the variance is recorded for information only.
+        boolean withinTolerance = true;
 
         var keyHolder = new GeneratedKeyHolder();
         jdbc.update("""
@@ -237,6 +237,9 @@ public class SurveyService {
         }
         saveSegments(submissionId, req.segments());
         saveBoundaryPoints(submissionId, req.boundaryPoints());
+        if (children.isEmpty()) {
+            applySurveyToProperty(ctx, req, measuredUnit);
+        }
         List<Map<String, Object>> childTokens = children.isEmpty()
                 ? saveParcels(ctx, submissionId, req.parcels())
                 : updateSubdivisionProperties(submissionId, req.parcels(), measuredUnit, withinTolerance);
@@ -255,7 +258,7 @@ public class SurveyService {
         out.put("routedTo", withinTolerance ? "VAO_VERIFICATION" : "SURVEY_CORRECTION_REVIEW");
         out.put("childTokens", childTokens);
 
-        if (withinTolerance && !children.isEmpty()) {
+        if (withinTolerance && ctx.subdivisionAtRegistration()) {
             TransactionContext reloaded = repository.load(txnRef, user.stateCode());
             out.put("status", workflow.apply(reloaded, "SUBMIT_SUBDIVISION_SURVEY", null, user));
             tokens.annotateChildren((String) ctx.transaction().get("state_code"), ctx.id(),
@@ -269,6 +272,9 @@ public class SurveyService {
             registration.createProposedMutation(reloaded, registrationId,
                     registration.resultingOwners(reloaded), submissionId);
             out.put("status", workflow.apply(reloaded, "SUBMIT_SURVEY", null, user));
+            tokens.annotateChildren((String) ctx.transaction().get("state_code"), ctx.id(),
+                    new TokenService.ChainEvent("SUBMIT_SURVEY", "SURVEYOR", user.id(), "APPROVED",
+                            "SURVEY_APPROVED", req.siteNotes()));
         } else {
             out.put("status", ctx.status());
             out.put("note", "Measured extent is outside tolerance; the submission is routed to survey correction "
@@ -480,7 +486,6 @@ public class SurveyService {
         children.forEach(child -> expected.add((String) child.get("property_ref")));
         Set<String> given = new HashSet<>();
         Set<String> numbers = new HashSet<>();
-        BigDecimal total = BigDecimal.ZERO;
         for (ParcelInput parcel : parcels) {
             String ref = blankToNull(parcel.propertyRef());
             if (ref == null || !expected.contains(ref) || !given.add(ref)) {
@@ -502,20 +507,61 @@ public class SurveyService {
                     || blankToNull(parcel.boundaryEast()) == null || blankToNull(parcel.boundaryWest()) == null) {
                 throw ApiException.badRequest("Enter the north, south, east and west boundaries of " + ref);
             }
-            String unit = blankToNull(parcel.extentUnit()) == null ? measuredUnit : AreaUnits.code(parcel.extentUnit());
-            total = total.add(AreaUnits.convert(parcel.extentValue(), unit, measuredUnit));
         }
         if (!given.equals(expected)) {
             throw ApiException.badRequest("Survey details must be given once for each new property: "
                     + String.join(", ", expected));
         }
-        BigDecimal measured = req.measuredExtent();
-        BigDecimal difference = total.subtract(measured).abs().divide(measured, 6, RoundingMode.HALF_UP).multiply(HUNDRED);
-        if (difference.compareTo(defaultTolerancePct) > 0) {
-            throw ApiException.badRequest("The new properties add up to " + total.stripTrailingZeros().toPlainString()
-                    + " but the measured extent is " + measured.stripTrailingZeros().toPlainString()
-                    + "; they must match within " + defaultTolerancePct.stripTrailingZeros().toPlainString() + "%");
+    }
+
+    /** The surveyed extent, boundaries and measurements replace the property's recorded values. */
+    private void applySurveyToProperty(TransactionContext ctx, SubmissionRequest req, String measuredUnit) {
+        long propertyId = ((Number) ctx.property().get("id")).longValue();
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("id", propertyId)
+                .addValue("extent", req.measuredExtent())
+                .addValue("unit", measuredUnit)
+                .addValue("north", blankToNull(req.boundaryNorth()))
+                .addValue("south", blankToNull(req.boundarySouth()))
+                .addValue("east", blankToNull(req.boundaryEast()))
+                .addValue("west", blankToNull(req.boundaryWest()));
+        jdbc.update("""
+                UPDATE core.property SET extent_value = :extent, extent_unit = :unit,
+                       boundary_north = coalesce(:north, boundary_north),
+                       boundary_south = coalesce(:south, boundary_south),
+                       boundary_east = coalesce(:east, boundary_east),
+                       boundary_west = coalesce(:west, boundary_west)
+                 WHERE id = :id
+                """, params);
+        jdbc.update("""
+                UPDATE core.property_survey SET extent_value = :extent, extent_unit = :unit
+                 WHERE property_id = :id AND seq = 1
+                """, params);
+        replaceMeasurements(propertyId, req.segments());
+    }
+
+    /** Surveyed boundary lengths replace the property's measurements; none given keeps the recorded ones. */
+    private void replaceMeasurements(long propertyId, List<SegmentInput> input) {
+        List<SegmentInput> segments = input == null ? List.of() : input.stream()
+                .filter(seg -> seg.lengthValue() != null && seg.lengthValue().signum() > 0).toList();
+        if (segments.isEmpty()) {
+            return;
         }
+        MapSqlParameterSource id = new MapSqlParameterSource("id", propertyId);
+        jdbc.update("DELETE FROM core.property_measurement WHERE property_id = :id", id);
+        int seq = 1;
+        for (SegmentInput seg : segments) {
+            jdbc.update("""
+                    INSERT INTO core.property_measurement (property_id, seq, from_point, to_point, value, unit)
+                    VALUES (:id, :seq, :from, :to, :value, :unit)
+                    """, new MapSqlParameterSource().addValue("id", propertyId).addValue("seq", seq++)
+                    .addValue("from", direction(seg.fromPoint())).addValue("to", direction(seg.toPoint()))
+                    .addValue("value", seg.lengthValue()).addValue("unit", seg.lengthUnit()));
+        }
+    }
+
+    private static String direction(String value) {
+        return value == null ? null : value.trim().toUpperCase().replace(' ', '_').replace('-', '_');
     }
 
     private List<Map<String, Object>> updateSubdivisionProperties(long submissionId, List<ParcelInput> parcels,
@@ -558,6 +604,9 @@ public class SurveyService {
                           FROM core.property p
                          WHERE s.property_id = p.id AND p.property_ref = :ref AND s.seq = 1
                         """, params);
+                Long childId = jdbc.queryForObject("SELECT id FROM core.property WHERE property_ref = :ref",
+                        params, Long.class);
+                replaceMeasurements(childId, parcel.segments());
             }
         }
         return List.of();

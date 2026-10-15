@@ -3,6 +3,7 @@ package in.gov.slate.registration;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -107,6 +108,10 @@ public class RegistrationService {
         List<Map<String, Object>> newProperties = List.of();
         if (ctx.subdivisionAtRegistration()) {
             List<Map<String, Object>> minted = createSubdivisionProperties(ctx, today);
+            token = minted.get(0);
+            newProperties = childProperties(ctx.id());
+        } else if ("PARTITION".equals(ctx.deedTypeCode())) {
+            List<Map<String, Object>> minted = createPartitionProperties(ctx, today);
             token = minted.get(0);
             newProperties = childProperties(ctx.id());
         } else {
@@ -223,7 +228,106 @@ public class RegistrationService {
                         null));
     }
 
-    /** The new properties a subdivision transaction created at Register, with their current owners. */
+    /**
+     * Partition at Register: one new property per partition schedule, owned by the schedule's allottees, with the
+     * schedule's survey numbers, extent and boundaries. The Surveyor later records the measured extent, official
+     * subdivision number and boundaries of each. The parent becomes INACTIVE and its owners are closed by
+     * {@link TokenService#subdivide}.
+     */
+    private List<Map<String, Object>> createPartitionProperties(TransactionContext ctx, LocalDate today) {
+        if (!"ACTIVE".equals(ctx.property().get("status"))) {
+            throw ApiException.conflict("Property " + ctx.propertyRef() + " is inactive; it cannot be partitioned");
+        }
+        var txnParam = new MapSqlParameterSource("txnId", ctx.id());
+        List<Map<String, Object>> schedules = jdbc.queryForList("""
+                SELECT id, label, array_to_string(allotted_member_refs, ',') AS member_refs, total_extent,
+                       extent_unit, north_boundary, south_boundary, east_boundary, west_boundary
+                  FROM core.transaction_schedule WHERE transaction_id = :txnId ORDER BY seq
+                """, txnParam);
+        if (schedules.size() < 2) {
+            throw ApiException.conflict("A partition needs at least two schedules; save the partition schedules first");
+        }
+        Map<String, String> names = new HashMap<>();
+        pii.revealRows(jdbc.queryForList("SELECT member_ref, name FROM core.partition_member WHERE transaction_id = :txnId",
+                txnParam)).forEach(m -> names.put((String) m.get("member_ref"), (String) m.get("name")));
+        List<Map<String, Object>> lines = jdbc.queryForList("""
+                SELECT ss.schedule_id, ss.survey_no, ss.subdivision_no, ss.extent_allotted, ss.extent_unit
+                  FROM core.transaction_schedule_survey ss
+                  JOIN core.transaction_schedule s ON s.id = ss.schedule_id
+                 WHERE s.transaction_id = :txnId ORDER BY s.seq, ss.seq
+                """, txnParam);
+
+        String stateCode = (String) ctx.transaction().get("state_code");
+        long parentId = ((Number) ctx.property().get("id")).longValue();
+        long userId = CurrentUser.require().id();
+        List<TokenService.ChildParcel> children = new ArrayList<>();
+        int seq = 1;
+        for (Map<String, Object> schedule : schedules) {
+            long scheduleId = ((Number) schedule.get("id")).longValue();
+            List<Map<String, Object>> surveys = lines.stream()
+                    .filter(l -> ((Number) l.get("schedule_id")).longValue() == scheduleId).toList();
+            String refs = (String) schedule.get("member_refs");
+            List<TokenService.Owner> owners = (refs == null ? List.<String>of() : List.of(refs.split(","))).stream()
+                    .map(names::get).filter(java.util.Objects::nonNull)
+                    .map(name -> new TokenService.Owner(name, null)).toList();
+            if (owners.isEmpty() || surveys.isEmpty()) {
+                throw ApiException.conflict(schedule.get("label") + " needs its allotted person(s) and survey numbers");
+            }
+            String childRef = numbering.next(stateCode, "PROPERTY_REF", (String) ctx.property().get("district_code"));
+            var keyHolder = new GeneratedKeyHolder();
+            jdbc.update("""
+                    INSERT INTO core.property (state_code, property_ref, property_type_code, nature_of_title_code,
+                        land_type_code, classification_code, extent_value, extent_unit, survey_no, subdivision_no,
+                        old_survey_reference, district_code, taluk_code, village_code, sro_code, street, door_no,
+                        guideline_value, guideline_value_reference, parent_property_id, created_by,
+                        boundary_north, boundary_south, boundary_east, boundary_west)
+                    SELECT p.state_code, :childRef, p.property_type_code, 'PARTITION', p.land_type_code,
+                           p.classification_code, :extent, COALESCE(:unit, p.extent_unit), :surveyNo, :subdivisionNo,
+                           concat_ws('/', p.survey_no, NULLIF(p.subdivision_no, '')), p.district_code,
+                           p.taluk_code, p.village_code, p.sro_code, p.street, p.door_no, p.guideline_value,
+                           p.guideline_value_reference, p.id, :userId,
+                           COALESCE(:north, p.boundary_north), COALESCE(:south, p.boundary_south),
+                           COALESCE(:east, p.boundary_east), COALESCE(:west, p.boundary_west)
+                      FROM core.property p WHERE p.id = :parentId
+                    """, new MapSqlParameterSource()
+                    .addValue("childRef", childRef)
+                    .addValue("extent", schedule.get("total_extent"))
+                    .addValue("unit", schedule.get("extent_unit"))
+                    .addValue("surveyNo", surveys.get(0).get("survey_no"))
+                    .addValue("subdivisionNo", surveys.get(0).get("subdivision_no"))
+                    .addValue("north", schedule.get("north_boundary"))
+                    .addValue("south", schedule.get("south_boundary"))
+                    .addValue("east", schedule.get("east_boundary"))
+                    .addValue("west", schedule.get("west_boundary"))
+                    .addValue("parentId", parentId)
+                    .addValue("userId", userId), keyHolder, new String[]{"id"});
+            long childId = keyHolder.getKey().longValue();
+            int surveySeq = 1;
+            for (Map<String, Object> line : surveys) {
+                jdbc.update("""
+                        INSERT INTO core.property_survey (property_id, seq, survey_no, subdivision_no, extent_value,
+                            extent_unit)
+                        VALUES (:propertyId, :seq, :surveyNo, :subdivisionNo, :extent, :unit)
+                        """, new MapSqlParameterSource().addValue("propertyId", childId).addValue("seq", surveySeq++)
+                        .addValue("surveyNo", line.get("survey_no")).addValue("subdivisionNo", line.get("subdivision_no"))
+                        .addValue("extent", line.get("extent_allotted")).addValue("unit", line.get("extent_unit")));
+            }
+            PropertyService.copyBoundaryMeasurements(jdbc, parentId, childId);
+            jdbc.update("""
+                    INSERT INTO core.transaction_property (transaction_id, property_id, seq, allotted_side)
+                    VALUES (:txnId, :propertyId, :seq, 'SIDE_2')
+                    """, new MapSqlParameterSource().addValue("txnId", ctx.id()).addValue("propertyId", childId)
+                    .addValue("seq", seq++));
+            applyRegisteredOwnership(ctx, childId, owners, today);
+            children.add(new TokenService.ChildParcel(childRef, childId, owners));
+        }
+        CurrentUser user = CurrentUser.require();
+        return tokens.subdivide(stateCode, parentId, ctx.propertyRef(), ctx.id(), children,
+                new TokenService.ChainEvent("REGISTER", "REGISTRATION_OFFICER", user.id(), "APPROVED", "REGISTERED",
+                        null));
+    }
+
+    /** The new properties a subdivision or partition transaction created at Register, with their current owners. */
     public List<Map<String, Object>> childProperties(long transactionId) {
         return jdbc.queryForList(CHILD_PROPERTIES_SQL, new MapSqlParameterSource("txnId", transactionId));
     }

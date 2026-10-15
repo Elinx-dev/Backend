@@ -252,8 +252,11 @@ public class RevenueService {
                  WHERE id = :id
                 """, new MapSqlParameterSource().addValue("id", mutationId).addValue("remarks", req.remarks()));
 
-        // A subdivision's parent is inactive; each child property gets its own Revenue record and owners.
-        String revenueRows = ctx.subdivisionAtRegistration() ? """
+        // A subdivision's or partition's parent is inactive; each child property gets its own Revenue record and owners.
+        boolean childProperties = Boolean.TRUE.equals(jdbc.queryForObject(
+                "SELECT EXISTS (SELECT 1 FROM core.transaction_property WHERE transaction_id = :txnId)",
+                new MapSqlParameterSource("txnId", ctx.id()), Boolean.class));
+        String revenueRows = childProperties ? """
                 SELECT p.id, :recordNumber, p.survey_no, p.subdivision_no, :landContext,
                        COALESCE((SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
                                             'name', o.owner_name, 'sharePct', o.share_pct)) ORDER BY o.id)
@@ -298,10 +301,10 @@ public class RevenueService {
         return detail(mutationId);
     }
 
-    /** Subdivision at Register: the officer action becomes a new block on each child token. */
+    /** Subdivision or partition at Register: the officer action becomes a new block on each child token. */
     private void recordChildBlocks(TransactionContext ctx, CurrentUser user, String action, String role,
                                    String decision, String approvalStatus, String remarks) {
-        if (ctx.subdivisionAtRegistration()) {
+        if (ctx.subdivisionAtRegistration() || "PARTITION".equals(ctx.deedTypeCode())) {
             tokens.annotateChildren((String) ctx.transaction().get("state_code"), ctx.id(),
                     new TokenService.ChainEvent(action, role, user.id(), decision, approvalStatus, remarks));
         }

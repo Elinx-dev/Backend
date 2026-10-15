@@ -404,8 +404,8 @@ public class PartitionService {
         parcels(ctx).forEach(p -> parcels.put(parcelKey(p.get("survey_no"), p.get("subdivision_no")), p));
 
         List<ScheduleInput> input = schedules == null ? List.of() : schedules;
-        if (input.isEmpty()) {
-            throw ApiException.badRequest("Add at least one schedule");
+        if (input.size() < 2) {
+            throw ApiException.badRequest("Add at least two schedules; each schedule becomes a new property");
         }
         Set<String> labels = new HashSet<>();
         Map<String, BigDecimal> allotted = new LinkedHashMap<>();
