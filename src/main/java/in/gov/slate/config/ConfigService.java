@@ -239,6 +239,18 @@ public class ConfigService {
         return out;
     }
 
+    /** A state's own value of a feature flag, falling back to the platform-wide ('*') value. */
+    public boolean flagEnabled(String stateCode, String flagCode) {
+        Boolean enabled = jdbc.query("""
+                SELECT enabled FROM cfg.feature_flag
+                 WHERE flag_code = :flagCode AND state_code IN (:stateCode, '*')
+                 ORDER BY (state_code = '*') LIMIT 1
+                """, new MapSqlParameterSource().addValue("flagCode", flagCode)
+                .addValue("stateCode", stateCode == null ? "*" : stateCode),
+                rs -> rs.next() ? rs.getBoolean(1) : null);
+        return Boolean.TRUE.equals(enabled);
+    }
+
     public Map<String, Boolean> featureFlags() {
         Map<String, Boolean> out = new LinkedHashMap<>();
         jdbc.queryForList("SELECT flag_code, enabled FROM cfg.feature_flag", new MapSqlParameterSource())
@@ -258,9 +270,9 @@ public class ConfigService {
            ORDER BY module
           """, new MapSqlParameterSource("stateCode", stateCode)));
         out.put("featureFlags", jdbc.queryForList("""
-          SELECT id, flag_code, enabled, description
+          SELECT DISTINCT ON (flag_code) id, flag_code, enabled, description
             FROM cfg.feature_flag
-           WHERE state_code IN (:stateCode, '*') ORDER BY flag_code
+           WHERE state_code IN (:stateCode, '*') ORDER BY flag_code, (state_code = '*')
           """, new MapSqlParameterSource("stateCode", stateCode)));
         out.put("workflows", jdbc.queryForList("""
           SELECT id, deed_type_code, workflow_code, version, status,

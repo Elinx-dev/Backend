@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import in.gov.slate.common.ApiException;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
+import in.gov.slate.config.ConfigService;
 import in.gov.slate.connectors.AadhaarConnector;
 import in.gov.slate.transaction.TransactionContext;
 import in.gov.slate.transaction.TransactionRepository;
@@ -26,22 +27,36 @@ import in.gov.slate.transaction.WorkflowEngine;
 @Service
 public class ConsentService {
 
+    /** State admin feature flag: on = real Aadhaar OTP API, off = mock OTP. */
+    public static final String AADHAAR_OTP_LIVE = "AADHAAR_OTP_LIVE";
+    private static final java.util.regex.Pattern AADHAAR = java.util.regex.Pattern.compile("\\d{12}");
+
     private final NamedParameterJdbcTemplate jdbc;
-    private final AadhaarConnector aadhaar;
+    private final Map<String, AadhaarConnector> connectors = new java.util.HashMap<>();
+    private final ConfigService config;
     private final TransactionRepository repository;
     private final WorkflowEngine workflow;
     private final AuditService audit;
     private final TransactionService transactions;
 
-    public ConsentService(NamedParameterJdbcTemplate jdbc, AadhaarConnector aadhaar,
-                          TransactionRepository repository, WorkflowEngine workflow, AuditService audit,
-                          TransactionService transactions) {
+    public ConsentService(NamedParameterJdbcTemplate jdbc, List<AadhaarConnector> aadhaarConnectors,
+                          ConfigService config, TransactionRepository repository, WorkflowEngine workflow,
+                          AuditService audit, TransactionService transactions) {
         this.jdbc = jdbc;
-        this.aadhaar = aadhaar;
+        aadhaarConnectors.forEach(c -> connectors.put(c.mode(), c));
+        this.config = config;
         this.repository = repository;
         this.workflow = workflow;
         this.audit = audit;
         this.transactions = transactions;
+    }
+
+    private AadhaarConnector connector(String mode) {
+        AadhaarConnector connector = connectors.get(mode == null ? "MOCK" : mode);
+        if (connector == null) {
+            throw new IllegalStateException("No Aadhaar connector for mode " + mode);
+        }
+        return connector;
     }
 
     @Transactional
@@ -58,6 +73,8 @@ public class ConsentService {
         }
         workflow.requireStatus(ctx, "CONSENT_PENDING", "Consent OTP request", user);
         String consentTextVersion = consentTextVersion();
+        String mode = config.flagEnabled(user.stateCode(), AADHAAR_OTP_LIVE) ? "LIVE" : "MOCK";
+        AadhaarConnector aadhaar = connector(mode);
 
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> party : ctx.parties()) {
@@ -69,11 +86,20 @@ public class ConsentService {
             if (!Boolean.TRUE.equals(party.get("aadhaar_captured"))) {
                 throw ApiException.badRequest("Party " + party.get("name") + " has no Aadhaar on record");
             }
-            var result = aadhaar.requestOtp((String) party.get("aadhaar_last4"), consentTextVersion);
+            String number = (String) party.get("aadhaar_last4");
+            if ("LIVE".equals(mode)) {
+                number = transactions.partyAadhaarForOtp(partyId);
+                if (number == null || !AADHAAR.matcher(number).matches()) {
+                    throw ApiException.badRequest("Re-enter the 12-digit Aadhaar of " + party.get("name")
+                            + ": the live Aadhaar OTP service needs the full number");
+                }
+            }
+            var result = aadhaar.requestOtp(number, consentTextVersion);
             jdbc.update("""
                     INSERT INTO core.consent_record (transaction_id, party_id, aadhaar_hash, otp_request_reference,
-                        status, requested_at, officer_user_id, consent_text_version)
-                    SELECT :txnId, p.id, p.aadhaar_hash, :reference, 'PENDING', now(), :officer, :consentVersion
+                        status, requested_at, officer_user_id, consent_text_version, otp_mode)
+                    SELECT :txnId, p.id, p.aadhaar_hash, :reference, 'PENDING', now(), :officer, :consentVersion,
+                           :mode
                       FROM core.transaction_party p
                      WHERE p.id = :partyId AND p.transaction_id = :txnId
                     ON CONFLICT (transaction_id, party_id) DO UPDATE
@@ -81,13 +107,15 @@ public class ConsentService {
                             status = 'PENDING',
                             requested_at = now(),
                             attempt_count = 0,
-                            verified_at = NULL
+                            verified_at = NULL,
+                            otp_mode = EXCLUDED.otp_mode
                     """, new MapSqlParameterSource()
                     .addValue("txnId", ctx.id())
                     .addValue("partyId", partyId)
                     .addValue("reference", result.requestReference())
                     .addValue("officer", user.id())
-                    .addValue("consentVersion", consentTextVersion));
+                    .addValue("consentVersion", consentTextVersion)
+                    .addValue("mode", mode));
 
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("partyId", partyId);
@@ -95,7 +123,10 @@ public class ConsentService {
             row.put("otpRequestReference", result.requestReference());
             row.put("maskedTarget", result.maskedTarget());
             row.put("validitySeconds", result.validitySeconds());
-            row.put("demoOtp", result.demoOtp());
+            row.put("otpMode", mode);
+            if (result.demoOtp() != null) {
+                row.put("demoOtp", result.demoOtp());
+            }
             out.add(row);
 
             audit.record("CONSENT_OTP_REQUESTED", "CONSENT", String.valueOf(partyId), txnRef, ctx.propertyRef(),
@@ -115,7 +146,7 @@ public class ConsentService {
         workflow.requireStatus(ctx, "CONSENT_PENDING", "Consent verification", user);
 
         var rows = jdbc.queryForList("""
-                SELECT id, otp_request_reference, status, attempt_count
+                SELECT id, otp_request_reference, status, attempt_count, otp_mode
                   FROM core.consent_record WHERE transaction_id = :txnId AND party_id = :partyId
                 """, new MapSqlParameterSource().addValue("txnId", ctx.id()).addValue("partyId", partyId));
         if (rows.isEmpty()) {
@@ -126,7 +157,8 @@ public class ConsentService {
             return verificationResult(partyId, ctx, user);
         }
         long consentId = ((Number) consent.get("id")).longValue();
-        boolean ok = aadhaar.verifyOtp((String) consent.get("otp_request_reference"), otp);
+        boolean ok = connector((String) consent.get("otp_mode"))
+                .verifyOtp((String) consent.get("otp_request_reference"), otp);
 
         jdbc.update("""
                 UPDATE core.consent_record
@@ -144,6 +176,7 @@ public class ConsentService {
         if (!ok) {
             throw ApiException.badRequest("Incorrect OTP for this party");
         }
+        transactions.forgetPartyAadhaar(partyId);
         return verificationResult(partyId, repository.load(txnRef, user.stateCode()), user);
     }
 

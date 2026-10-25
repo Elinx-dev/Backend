@@ -25,6 +25,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
+import in.gov.slate.config.ConfigService;
 import in.gov.slate.connectors.AadhaarConnector;
 import in.gov.slate.transaction.TransactionContext;
 import in.gov.slate.transaction.TransactionRepository;
@@ -46,13 +47,16 @@ class ConsentServiceTest {
     private AuditService audit;
     @Mock
     private TransactionService transactions;
+    @Mock
+    private ConfigService config;
 
     private ConsentService service;
     private CurrentUser user;
 
     @BeforeEach
     void setUp() {
-        service = new ConsentService(jdbc, aadhaar, repository, workflow, audit, transactions);
+        when(aadhaar.mode()).thenReturn("MOCK");
+        service = new ConsentService(jdbc, List.of(aadhaar), config, repository, workflow, audit, transactions);
         user = new CurrentUser(1L, "ro.adyar", "R. Anandhi", "TN", "REGISTRATION",
                 Set.of("REGISTRATION_OFFICER"), Set.of("CONSENT_CAPTURE"), Set.of("ADYAR"), Set.of());
         SecurityContextHolder.getContext().setAuthentication(

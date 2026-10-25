@@ -19,9 +19,13 @@ import in.gov.slate.common.ApiException;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
 import in.gov.slate.common.Hashes;
+import in.gov.slate.config.ConfigService;
 
 @Service
 public class AuthService {
+
+    /** State admin flag: on = login codes are emailed, off = the mock code is accepted. */
+    public static final String LOGIN_EMAIL_OTP = "LOGIN_EMAIL_OTP";
 
     private static final int MAX_OTP_ATTEMPTS = 5;
 
@@ -31,13 +35,14 @@ public class AuthService {
     private final AuthEmailService email;
     private final JwtService jwt;
     private final AuditService audit;
+    private final ConfigService config;
     private final SecureRandom random = new SecureRandom();
     private final String demoOtp;
     private final int otpValiditySeconds;
     private final int resetValidityMinutes;
 
     public AuthService(UserRepository users, PasswordEncoder encoder, PasswordCryptoService passwordCrypto,
-                       AuthEmailService email, JwtService jwt, AuditService audit,
+                       AuthEmailService email, JwtService jwt, AuditService audit, ConfigService config,
                        @Value("${slate.otp.officer-demo-otp}") String demoOtp,
                        @Value("${slate.otp.validity-seconds}") int otpValiditySeconds,
                        @Value("${slate.password-reset.validity-minutes}") int resetValidityMinutes) {
@@ -47,6 +52,7 @@ public class AuthService {
         this.email = email;
         this.jwt = jwt;
         this.audit = audit;
+        this.config = config;
         this.demoOtp = demoOtp;
         this.otpValiditySeconds = otpValiditySeconds;
         this.resetValidityMinutes = resetValidityMinutes;
@@ -74,20 +80,25 @@ public class AuthService {
                     "No email address is configured for this account");
         }
 
-        String otp = email.exposesDemoSecrets() ? demoOtp : String.format("%06d", random.nextInt(1_000_000));
+        // State admin flag: on = a random code is emailed to the user's address, off = the mock code.
+        boolean live = config.flagEnabled(user.stateCode(), LOGIN_EMAIL_OTP);
+        String otp = live ? String.format("%06d", random.nextInt(1_000_000)) : demoOtp;
         UUID challengeId = UUID.randomUUID();
         OffsetDateTime expiresAt = OffsetDateTime.now(ZoneOffset.UTC).plusSeconds(otpValiditySeconds);
         users.createLoginOtp(user.id(), challengeId, encoder.encode(otp), expiresAt);
         audit.recordAs(user.stateCode(), "LOGIN_MFA_REQUESTED", "USER", String.valueOf(user.id()), null, null,
                 null, Map.of("username", user.username()), "SUCCESS", null);
-        email.sendLoginOtp(user.email(), user.fullName(), otp, otpValiditySeconds);
+        if (live) {
+            email.sendLoginOtp(user.email(), user.fullName(), otp, otpValiditySeconds, true);
+        }
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("mfaRequired", true);
         out.put("challengeId", challengeId.toString());
         out.put("maskedEmail", maskEmail(user.email()));
         out.put("expiresAt", expiresAt.toString());
-        if (email.exposesDemoSecrets()) {
+        out.put("emailOtp", live);
+        if (!live && email.exposesDemoSecrets(false)) {
             out.put("demoOtp", otp);
         }
         return out;
@@ -148,8 +159,9 @@ public class AuthService {
         users.createPasswordResetToken(user.id(), Hashes.sha256(token), expiresAt);
         audit.recordAs(user.stateCode(), "PASSWORD_RESET_REQUESTED", "USER", String.valueOf(user.id()), null, null,
                 null, Map.of("username", user.username()), "SUCCESS", null);
-        String resetUrl = email.sendPasswordReset(user.email(), user.fullName(), token, resetValidityMinutes);
-        if (email.exposesDemoSecrets()) {
+        boolean live = config.flagEnabled(user.stateCode(), LOGIN_EMAIL_OTP);
+        String resetUrl = email.sendPasswordReset(user.email(), user.fullName(), token, resetValidityMinutes, live);
+        if (email.exposesDemoSecrets(live)) {
             out.put("demoResetUrl", resetUrl);
         }
         return out;

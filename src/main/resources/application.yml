@@ -63,11 +63,25 @@ slate:
     from: ${SLATE_MAIL_FROM:no-reply@slate.gov.in}
     reset-base-url: ${SLATE_RESET_BASE_URL:http://localhost:5173/reset-password}
     expose-demo-secrets: ${SLATE_EXPOSE_DEMO_SECRETS:true}
+    # How real emails are sent (login code when LOGIN_EMAIL_OTP is on, password reset):
+    # GRAPH = Microsoft 365 Graph sendMail (same as BUMI), SMTP = the spring.mail settings above.
+    provider: ${SLATE_MAIL_PROVIDER:GRAPH}
+    graph:
+      tenant-id: ${SLATE_GRAPH_TENANT_ID:}
+      client-id: ${SLATE_GRAPH_CLIENT_ID:}
+      client-secret: ${SLATE_GRAPH_CLIENT_SECRET:}
   aadhaar:
     # Raw Aadhaar is never persisted. Parties are stored as a salted SHA-256 hash
     # plus the last four digits; the salt itself lives outside the database.
     salt: ${SLATE_AADHAAR_SALT:local-demo-aadhaar-salt}
     salt-ref: ${SLATE_AADHAAR_SALT_REF:local-demo-v1}
+    # Real Aadhaar OTP gateway (ASA / KUA provider), used for a state once its AADHAAR_OTP_LIVE flag is on.
+    live:
+      base-url: ${SLATE_AADHAAR_API_URL:}
+      api-key: ${SLATE_AADHAAR_API_KEY:}
+      otp-path: ${SLATE_AADHAAR_OTP_PATH:/otp/request}
+      verify-path: ${SLATE_AADHAAR_VERIFY_PATH:/otp/verify}
+      timeout-seconds: ${SLATE_AADHAAR_API_TIMEOUT:15}
   pii:
     # AES-256-GCM key (base64 of 32 bytes) for Aadhaar, PAN, mobile and address at rest.
     # Keep it in a secret store; the local demo key is used when unset. Old keys stay

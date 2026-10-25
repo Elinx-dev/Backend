@@ -2,7 +2,11 @@ package in.gov.slate.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -23,6 +27,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import in.gov.slate.common.AuditService;
 import in.gov.slate.common.CurrentUser;
+import in.gov.slate.config.ConfigService;
 
 @ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
@@ -39,12 +44,14 @@ class AuthServiceTest {
     private JwtService jwt;
     @Mock
     private AuditService audit;
+    @Mock
+    private ConfigService config;
 
     private AuthService service;
 
     @BeforeEach
     void setUp() {
-        service = new AuthService(users, encoder, passwordCrypto, email, jwt, audit, "123456", 300, 15);
+        service = new AuthService(users, encoder, passwordCrypto, email, jwt, audit, config, "123456", 300, 15);
     }
 
     @Test
@@ -53,7 +60,7 @@ class AuthServiceTest {
         when(users.findByLoginId("ro.adyar")).thenReturn(Optional.of(user));
         when(passwordCrypto.decrypt("encrypted")).thenReturn("Slate@123");
         when(encoder.matches("Slate@123", user.passwordHash())).thenReturn(true);
-        when(email.exposesDemoSecrets()).thenReturn(true);
+        when(email.exposesDemoSecrets(false)).thenReturn(true);
         when(encoder.encode("123456")).thenReturn("otp-hash");
 
         var result = service.login("ro.adyar", "encrypted", "127.0.0.1", "test");
@@ -62,7 +69,7 @@ class AuthServiceTest {
                 .containsEntry("maskedEmail", "r***@tn.demo.slate")
                 .containsEntry("demoOtp", "123456");
         verify(users).createLoginOtp(eq(user.id()), any(UUID.class), eq("otp-hash"), any(OffsetDateTime.class));
-        verify(email).sendLoginOtp(user.email(), user.fullName(), "123456", 300);
+        verify(email, never()).sendLoginOtp(anyString(), anyString(), anyString(), anyInt(), anyBoolean());
     }
 
     @Test
@@ -103,6 +110,22 @@ class AuthServiceTest {
         verify(users).updatePassword(user.id(), "new-hash");
         verify(users).consumePasswordReset(reset.id());
         verify(users).revokeAllSessions(user.id());
+    }
+
+    @Test
+    void liveEmailOtpSendsRandomCodeAndHidesDemoCode() {
+        var user = user(true);
+        when(users.findByLoginId("ro.adyar")).thenReturn(Optional.of(user));
+        when(passwordCrypto.decrypt("encrypted")).thenReturn("Slate@123");
+        when(encoder.matches("Slate@123", user.passwordHash())).thenReturn(true);
+        when(config.flagEnabled("TN", AuthService.LOGIN_EMAIL_OTP)).thenReturn(true);
+        when(encoder.encode(anyString())).thenReturn("otp-hash");
+
+        var result = service.login("ro.adyar", "encrypted", "127.0.0.1", "test");
+
+        assertThat(result).containsEntry("mfaRequired", true).containsEntry("emailOtp", true)
+                .doesNotContainKey("demoOtp");
+        verify(email).sendLoginOtp(eq(user.email()), eq(user.fullName()), anyString(), eq(300), eq(true));
     }
 
     private UserRepository.UserRow user(boolean mfaRequired) {

@@ -410,7 +410,7 @@ public class TokenService {
         args.put("tokenRef", tokenRef);
         args.put("operation", operation);
         args.put("stateHash", Hashes.hex(stateHash));
-        chain.anchor(new ChainService.AnchorRequest(stateCode, "PROPERTY_TOKEN", "recordTokenState",
+        chain.anchor(new ChainService.AnchorRequest(stateCode, "recordTokenState",
                 args, transactionId, tokenId, null, stateHash, tokenRef));
         // chain.token_state_history is append-only (V11): the tx hash stays on chain.blockchain_transaction.
     }
