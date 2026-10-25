@@ -188,7 +188,7 @@ public class TokenLedgerService {
         args.put("holderHash", Hashes.hex(holderHash));
         args.put("docHash", Hashes.hex(docHash));
         args.put("org", org.mspId());
-        chain.anchor(new ChainService.AnchorRequest(stateCode(token), ChainService.CONTRACT, "addEncumbrance", args,
+        chain.anchor(new ChainService.AnchorRequest(stateCode(token), "addEncumbrance", args,
                 null, tokenId, null, docHash, tokenRef));
         audit.record("ENCUMBRANCE_ADDED", "TOKEN", String.valueOf(tokenId), encRef, (String) token.get("property_ref"),
                 Map.of("type", type, "org", org.mspId()), null);
@@ -228,7 +228,7 @@ public class TokenLedgerService {
         args.put("encRef", encRef);
         args.put("docHash", Hashes.hex(docHash));
         args.put("org", org.mspId());
-        chain.anchor(new ChainService.AnchorRequest(stateCode(token), ChainService.CONTRACT, "releaseEncumbrance",
+        chain.anchor(new ChainService.AnchorRequest(stateCode(token), "releaseEncumbrance",
                 args, null, tokenId, null, docHash, (String) token.get("token_ref")));
         audit.record("ENCUMBRANCE_RELEASED", "TOKEN", String.valueOf(tokenId), encRef,
                 (String) token.get("property_ref"), Map.of("org", org.mspId()), null);
@@ -340,7 +340,7 @@ public class TokenLedgerService {
                     :tokenId, 'RegistrationMSP', 'TransferParcel', :reason)
                 """, new MapSqlParameterSource().addValue("stateCode", stateCode(token))
                 .addValue("network", "FABRIC_" + chain.ledger().channel().toUpperCase())
-                .addValue("contract", ChainService.CONTRACT)
+                .addValue("contract", chain.ledger().chaincode())
                 .addValue("args", chain.json(Map.of("tokenRef", tokenRef, "expectedVersion", staleVersion)))
                 .addValue("key", java.util.UUID.randomUUID())
                 .addValue("status", Boolean.TRUE.equals(out.get("rejected")) ? "REJECTED" : "MINED")

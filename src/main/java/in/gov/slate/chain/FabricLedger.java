@@ -164,8 +164,13 @@ public class FabricLedger {
 
     /** Current block height of the channel, or -1 when unreachable. */
     public long height() {
+        return height(Org.REGISTRATION);
+    }
+
+    /** Block height as seen by one organisation's peer, or -1 when that peer is unreachable. */
+    public long height(Org peerOrg) {
         try {
-            byte[] raw = network(Org.REGISTRATION).getContract("qscc").evaluateTransaction("GetChainInfo", channel);
+            byte[] raw = network(peerOrg).getContract("qscc").evaluateTransaction("GetChainInfo", channel);
             return org.hyperledger.fabric.protos.common.BlockchainInfo.parseFrom(raw).getHeight();
         } catch (Exception e) {
             return -1;

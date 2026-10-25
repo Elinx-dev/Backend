@@ -30,7 +30,6 @@ import in.gov.slate.chain.FabricLedger.Org;
 public class ChainService {
 
     private static final Logger log = LoggerFactory.getLogger(ChainService.class);
-    static final String CONTRACT = "PROPERTY_TOKEN";
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper mapper;
@@ -48,7 +47,7 @@ public class ChainService {
         this.maxAttempts = maxAttempts;
     }
 
-    public record AnchorRequest(String stateCode, String contractCode, String functionName,
+    public record AnchorRequest(String stateCode, String functionName,
                                 Map<String, Object> args, Long transactionId, Long tokenId,
                                 BigInteger onchainTokenId, byte[] stateHash, String tokenRef) {
     }
@@ -69,7 +68,7 @@ public class ChainService {
                 SELECT t.token_ref FROM core.transaction tx JOIN core.property p ON p.id = tx.property_id
                   JOIN chain.token t ON t.id = p.token_id WHERE tx.id = :id
                 """, new MapSqlParameterSource("id", transactionId), rs -> rs.next() ? rs.getString(1) : "");
-        anchor(new AnchorRequest(stateCode, CONTRACT, "recordDeed",
+        anchor(new AnchorRequest(stateCode, "recordDeed",
                 Map.of("documentNo", documentNo, "deedHash", in.gov.slate.common.Hashes.hex(deedHash),
                         "tokenRef", tokenRef == null ? "" : tokenRef, "role", "REGISTRATION_OFFICER"),
                 transactionId, null, null, deedHash, documentNo));
@@ -249,7 +248,7 @@ public class ChainService {
                 """, new MapSqlParameterSource()
                 .addValue("stateCode", request.stateCode())
                 .addValue("network", "FABRIC_" + ledger.channel().toUpperCase())
-                .addValue("contract", request.contractCode())
+                .addValue("contract", ledger.chaincode())
                 .addValue("function", request.functionName())
                 .addValue("args", json(request.args()))
                 .addValue("key", UUID.randomUUID())
