@@ -115,6 +115,9 @@ public class AuthEmailService {
             message.setText(body);
             mailSender.send(message);
         } catch (MailException ex) {
+            // e.g. Gmail "535-5.7.8 Username and Password not accepted" when a normal password is used, not an App Password.
+            Throwable root = ex.getMostSpecificCause();
+            log.warn("SMTP mail delivery from {} failed: {}", from, root.getMessage());
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "EMAIL_DELIVERY_FAILED",
                     "Unable to send authentication email");
         }
