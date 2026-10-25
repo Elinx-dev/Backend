@@ -68,8 +68,10 @@ public class GraphMailSender {
                 .build();
         HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() / 100 != 2) {
-            log.warn("Graph sendMail returned HTTP {}", response.statusCode());
-            throw new IllegalStateException("Graph sendMail failed with HTTP " + response.statusCode());
+            // e.g. 404 MailboxNotEnabledForRESTAPI: the SLATE_MAIL_FROM mailbox has no Exchange Online licence.
+            String reason = graphError(response.body());
+            log.warn("Graph sendMail from {} returned HTTP {} {}", from, response.statusCode(), reason);
+            throw new IllegalStateException("Graph sendMail failed with HTTP " + response.statusCode() + " " + reason);
         }
     }
 
@@ -88,12 +90,23 @@ public class GraphMailSender {
         HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
         JsonNode body = mapper.readTree(response.body());
         if (response.statusCode() / 100 != 2 || !body.hasNonNull("access_token")) {
-            log.warn("Graph token request returned HTTP {} {}", response.statusCode(), body.path("error").asText());
+            log.warn("Graph token request returned HTTP {} {} {}", response.statusCode(), body.path("error").asText(),
+                    body.path("error_description").asText().lines().findFirst().orElse(""));
             throw new IllegalStateException("Graph token request failed with HTTP " + response.statusCode());
         }
         accessToken = body.get("access_token").asText();
         tokenExpiresAt = Instant.now().plusSeconds(Math.max(60, body.path("expires_in").asLong(3600) - 120));
         return accessToken;
+    }
+
+    /** Graph's own error code and message, e.g. "ErrorInvalidUser: The requested user ... is invalid." */
+    private String graphError(String body) {
+        try {
+            JsonNode error = mapper.readTree(body).path("error");
+            return error.path("code").asText() + ": " + error.path("message").asText();
+        } catch (Exception ex) {
+            return "";
+        }
     }
 
     private static String enc(String value) {
