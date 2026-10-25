@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.BufferingClientHttpRequestFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -51,7 +52,8 @@ public class LiveAadhaarConnector implements AadhaarConnector {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(timeoutSeconds));
         factory.setReadTimeout(Duration.ofSeconds(timeoutSeconds));
-        this.http = RestClient.builder().requestFactory(factory).build();
+        // Buffered so the gateway receives a Content-Length instead of a chunked body.
+        this.http = RestClient.builder().requestFactory(new BufferingClientHttpRequestFactory(factory)).build();
     }
 
     @Override
