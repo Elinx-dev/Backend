@@ -336,13 +336,13 @@ public class TransactionService {
                         mobile, address, registration_no, representative_role, representative_name,
                         representative_designation, representative_aadhaar_last4, representative_pan,
                         representative_mobile, relationship_code, extent_transferred, authority_poa_reference,
-                        property_owner_id)
+                        property_owner_id, aadhaar_enc)
                     VALUES (:txnId, :side, :role, :seq, :partyType, :ownerType,
                         :name, :aadhaarHash, :last4, :saltRef, :kartaName, :kartaHash, :pan,
                         :mobile, :address, :registrationNo, :repRole, :repName,
                         :repDesignation, :repLast4, :repPan,
                         :repMobile, :relationshipCode, :extentTransferred, :authorityRef,
-                        :propertyOwnerId)
+                        :propertyOwnerId, :aadhaarEnc)
                     """, new MapSqlParameterSource()
                     .addValue("txnId", ctx.id())
                     .addValue("side", p.side())
@@ -369,7 +369,8 @@ public class TransactionService {
                     .addValue("relationshipCode", p.relationshipCode())
                     .addValue("extentTransferred", p.extentTransferred())
                     .addValue("authorityRef", p.authorityPoaReference())
-                    .addValue("propertyOwnerId", p.propertyOwnerId()));
+                    .addValue("propertyOwnerId", p.propertyOwnerId())
+                    .addValue("aadhaarEnc", pii.protect(aadhaar)));
         }
 
         TransactionContext updated = repository.load(txnRef, user.stateCode());
@@ -530,12 +531,12 @@ public class TransactionService {
                 .filter(p -> ((Number) p.get("id")).longValue() == partyId)
                 .findFirst()
                 .orElseThrow(() -> ApiException.notFound("Party " + partyId + " on " + txnRef));
-        if (Boolean.TRUE.equals(party.get("aadhaar_captured"))) {
-            throw ApiException.conflict("Party " + party.get("name") + " already has Aadhaar on record");
-        }
         String aadhaar = twelveDigits(aadhaarNumber);
         if (aadhaar == null) {
             throw ApiException.badRequest("Aadhaar must contain exactly 12 digits");
+        }
+        if (Boolean.TRUE.equals(party.get("aadhaar_captured")) && !sameAadhaar(partyId, aadhaar)) {
+            throw ApiException.conflict("Party " + party.get("name") + " already has Aadhaar on record");
         }
         storePartyAadhaar(ctx.id(), partyId, aadhaar);
         audit.record("PARTY_AADHAAR_CAPTURED", "TRANSACTION", String.valueOf(ctx.id()), txnRef, ctx.propertyRef(),
@@ -572,10 +573,51 @@ public class TransactionService {
         return updated;
     }
 
+    /** Re-entering the same Aadhaar for a captured party is allowed (the live OTP needs the full number). */
+    private boolean sameAadhaar(long partyId, String aadhaar) {
+        byte[] stored = jdbc.query("SELECT aadhaar_hash FROM core.transaction_party WHERE id = :id",
+                new MapSqlParameterSource("id", partyId), rs -> rs.next() ? rs.getBytes(1) : null);
+        return stored != null && java.util.Arrays.equals(stored, hashAadhaar(aadhaar));
+    }
+
+    /**
+     * The full Aadhaar of a party for the live Aadhaar OTP API: the encrypted copy kept until consent,
+     * else the linked property owner's. Null when neither is on record.
+     */
+    public String partyAadhaarForOtp(long partyId) {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT aadhaar_enc, property_owner_id FROM core.transaction_party WHERE id = :id",
+                new MapSqlParameterSource("id", partyId));
+        if (rows.isEmpty()) {
+            return null;
+        }
+        String aadhaar = twelveDigits(pii.reveal((String) rows.get(0).get("aadhaar_enc")));
+        Object ownerId = rows.get(0).get("property_owner_id");
+        if (aadhaar == null && ownerId != null) {
+            List<Map<String, Object>> owners = jdbc.queryForList(
+                    "SELECT aadhaar_number, representative_aadhaar FROM core.property_owner WHERE id = :id",
+                    new MapSqlParameterSource("id", ((Number) ownerId).longValue()));
+            if (!owners.isEmpty()) {
+                aadhaar = twelveDigits(pii.reveal((String) owners.get(0).get("aadhaar_number")));
+                if (aadhaar == null) {
+                    aadhaar = twelveDigits(pii.reveal((String) owners.get(0).get("representative_aadhaar")));
+                }
+            }
+        }
+        return aadhaar;
+    }
+
+    /** Once consent is verified the encrypted full Aadhaar is no longer needed. */
+    public void forgetPartyAadhaar(long partyId) {
+        jdbc.update("UPDATE core.transaction_party SET aadhaar_enc = NULL WHERE id = :id",
+                new MapSqlParameterSource("id", partyId));
+    }
+
     private void storePartyAadhaar(long txnId, long partyId, String aadhaar) {
         jdbc.update("""
                 UPDATE core.transaction_party
                    SET aadhaar_hash = :hash, aadhaar_last4 = :last4, aadhaar_salt_ref = :saltRef,
+                       aadhaar_enc = :enc,
                        representative_aadhaar_last4 = CASE WHEN representative_role IS NOT NULL
                            THEN :last4 ELSE representative_aadhaar_last4 END
                  WHERE id = :partyId AND transaction_id = :txnId
@@ -583,6 +625,7 @@ public class TransactionService {
                 .addValue("hash", hashAadhaar(aadhaar))
                 .addValue("last4", last4(aadhaar))
                 .addValue("saltRef", aadhaarSaltRef)
+                .addValue("enc", pii.protect(aadhaar))
                 .addValue("partyId", partyId)
                 .addValue("txnId", txnId));
     }

@@ -179,6 +179,7 @@ public class SurveyService {
         if (!children.isEmpty()) {
             validateSubdivisionParcels(req, children, measuredUnit);
         }
+        requireUniqueSurveyNumbers(ctx, req.parcels(), children);
         BigDecimal variance = recordedExtent.signum() == 0 ? BigDecimal.ZERO
                 : measuredInRecordUnit.subtract(recordedExtent).abs()
                 .divide(recordedExtent, 6, RoundingMode.HALF_UP).multiply(HUNDRED)
@@ -237,9 +238,7 @@ public class SurveyService {
         }
         saveSegments(submissionId, req.segments());
         saveBoundaryPoints(submissionId, req.boundaryPoints());
-        if (children.isEmpty()) {
-            applySurveyToProperty(ctx, req, measuredUnit);
-        }
+        applySurveyToProperty(ctx, req, measuredUnit);
         List<Map<String, Object>> childTokens = children.isEmpty()
                 ? saveParcels(ctx, submissionId, req.parcels())
                 : updateSubdivisionProperties(submissionId, req.parcels(), measuredUnit, withinTolerance);
@@ -411,15 +410,23 @@ public class SurveyService {
                     INSERT INTO core.property (state_code, property_ref, property_type_code, nature_of_title_code,
                         land_type_code, classification_code, extent_value, extent_unit, survey_no, subdivision_no,
                         old_survey_reference, district_code, taluk_code, village_code, sro_code, street, door_no,
-                        guideline_value, guideline_value_reference, parent_property_id, created_by)
+                        guideline_value, guideline_value_reference, parent_property_id, created_by,
+                        boundary_north, boundary_south, boundary_east, boundary_west)
                     SELECT p.state_code, :childRef, p.property_type_code, 'PARTITION', p.land_type_code,
-                           p.classification_code, :extent, :extentUnit, p.survey_no,
+                           p.classification_code, :extent, :extentUnit, coalesce(:surveyNo, p.survey_no),
                            :officialSubdivisionNo, p.subdivision_no, p.district_code,
                            p.taluk_code, p.village_code, p.sro_code, p.street, p.door_no, p.guideline_value,
-                           p.guideline_value_reference, p.id, :userId
+                           p.guideline_value_reference, p.id, :userId,
+                           coalesce(:north, p.boundary_north), coalesce(:south, p.boundary_south),
+                           coalesce(:east, p.boundary_east), coalesce(:west, p.boundary_west)
                       FROM core.property p WHERE p.id = :parentId
                     """, new MapSqlParameterSource()
                     .addValue("childRef", childRef)
+                    .addValue("surveyNo", blankToNull(parcel.surveyNo()))
+                    .addValue("north", blankToNull(parcel.boundaryNorth()))
+                    .addValue("south", blankToNull(parcel.boundarySouth()))
+                    .addValue("east", blankToNull(parcel.boundaryEast()))
+                    .addValue("west", blankToNull(parcel.boundaryWest()))
                     .addValue("extent", parcel.extentValue())
                     .addValue("extentUnit", parcel.extentUnit() != null ? parcel.extentUnit()
                             : ctx.property().get("extent_unit"))
@@ -428,6 +435,7 @@ public class SurveyService {
                     .addValue("userId", CurrentUser.require().id()), keyHolder, new String[]{"id"});
             long childPropertyId = keyHolder.getKey().longValue();
             PropertyService.copyBoundaryMeasurements(jdbc, parentPropertyId, childPropertyId);
+            replaceMeasurements(childPropertyId, parcel.segments());
 
             List<TokenService.Owner> owners = new ArrayList<>();
             if (parcel.owners() != null) {
@@ -512,6 +520,67 @@ public class SurveyService {
             throw ApiException.badRequest("Survey details must be given once for each new property: "
                     + String.join(", ", expected));
         }
+    }
+
+    /**
+     * A new survey / subdivision number must differ from the parent's and from every other property in the
+     * same village, active or inactive (including their additional survey records).
+     */
+    private void requireUniqueSurveyNumbers(TransactionContext ctx, List<ParcelInput> parcels,
+                                            List<Map<String, Object>> children) {
+        if (parcels == null || parcels.isEmpty()) {
+            return;
+        }
+        Map<String, Object> parent = ctx.property();
+        List<String> own = new ArrayList<>(List.of(""));
+        children.forEach(child -> own.add((String) child.get("property_ref")));
+        int index = 0;
+        for (ParcelInput parcel : parcels) {
+            index++;
+            String surveyNo = blankToNull(parcel.surveyNo());
+            if (surveyNo == null) {
+                continue;
+            }
+            String subdivisionNo = blankToNull(parcel.officialSubdivisionNo());
+            String number = surveyNo + (subdivisionNo == null ? "" : "/" + subdivisionNo);
+            String label = blankToNull(parcel.propertyRef()) == null ? "new property " + index : parcel.propertyRef();
+            if (normal(surveyNo).equals(normal(parent.get("survey_no")))
+                    && normal(subdivisionNo).equals(normal(parent.get("subdivision_no")))) {
+                throw ApiException.badRequest("Survey number " + number + " of " + label
+                        + " is the same as the parent property " + ctx.propertyRef()
+                        + "; enter the new survey / subdivision number");
+            }
+            List<Map<String, Object>> clash = jdbc.queryForList("""
+                    SELECT p.property_ref, p.status FROM core.property p
+                     WHERE p.state_code = :stateCode
+                       AND p.district_code IS NOT DISTINCT FROM :districtCode
+                       AND p.taluk_code IS NOT DISTINCT FROM :talukCode
+                       AND p.village_code IS NOT DISTINCT FROM :villageCode
+                       AND p.property_ref NOT IN (:own)
+                       AND ((upper(trim(p.survey_no)) = :surveyNo
+                             AND coalesce(upper(trim(p.subdivision_no)), '') = :subdivisionNo)
+                         OR EXISTS (SELECT 1 FROM core.property_survey ps
+                                     WHERE ps.property_id = p.id AND upper(trim(ps.survey_no)) = :surveyNo
+                                       AND coalesce(upper(trim(ps.subdivision_no)), '') = :subdivisionNo))
+                     ORDER BY p.id LIMIT 1
+                    """, new MapSqlParameterSource()
+                    .addValue("stateCode", parent.get("state_code"))
+                    .addValue("districtCode", parent.get("district_code"))
+                    .addValue("talukCode", parent.get("taluk_code"))
+                    .addValue("villageCode", parent.get("village_code"))
+                    .addValue("own", own)
+                    .addValue("surveyNo", normal(surveyNo))
+                    .addValue("subdivisionNo", normal(subdivisionNo)));
+            if (!clash.isEmpty()) {
+                throw ApiException.badRequest("Survey number " + number + " of " + label
+                        + " already exists in this village for property " + clash.get(0).get("property_ref")
+                        + " (" + clash.get(0).get("status") + "); enter a different survey / subdivision number");
+            }
+        }
+    }
+
+    private static String normal(Object value) {
+        return value == null ? "" : value.toString().trim().toUpperCase(java.util.Locale.ROOT);
     }
 
     /** The surveyed extent, boundaries and measurements replace the property's recorded values. */
