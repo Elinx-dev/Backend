@@ -70,6 +70,13 @@ slate:
       tenant-id: ${SLATE_GRAPH_TENANT_ID:}
       client-id: ${SLATE_GRAPH_CLIENT_ID:}
       client-secret: ${SLATE_GRAPH_CLIENT_SECRET:}
+  sms:
+    # 2Factor.in, used for the login code once a state's LOGIN_SMS_OTP flag is on.
+    two-factor:
+      api-key: ${SLATE_SMS_2FACTOR_API_KEY:}
+      base-url: ${SLATE_SMS_2FACTOR_BASE_URL:https://2factor.in}
+      template: ${SLATE_SMS_2FACTOR_TEMPLATE:}
+      sender-id: ${SLATE_SMS_SENDER_ID:}
   aadhaar:
     # Raw Aadhaar is never persisted. Parties are stored as a salted SHA-256 hash
     # plus the last four digits; the salt itself lives outside the database.

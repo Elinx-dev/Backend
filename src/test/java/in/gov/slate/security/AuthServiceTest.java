@@ -46,12 +46,14 @@ class AuthServiceTest {
     private AuditService audit;
     @Mock
     private ConfigService config;
+    @Mock
+    private SmsOtpSender sms;
 
     private AuthService service;
 
     @BeforeEach
     void setUp() {
-        service = new AuthService(users, encoder, passwordCrypto, email, jwt, audit, config, "123456", 300, 15);
+        service = new AuthService(users, encoder, passwordCrypto, email, jwt, audit, config, sms, "123456", 300, 15);
     }
 
     @Test
@@ -118,6 +120,7 @@ class AuthServiceTest {
         when(users.findByLoginId("ro.adyar")).thenReturn(Optional.of(user));
         when(passwordCrypto.decrypt("encrypted")).thenReturn("Slate@123");
         when(encoder.matches("Slate@123", user.passwordHash())).thenReturn(true);
+        when(config.flagEnabled("TN", AuthService.LOGIN_SMS_OTP)).thenReturn(false);
         when(config.flagEnabled("TN", AuthService.LOGIN_EMAIL_OTP)).thenReturn(true);
         when(encoder.encode(anyString())).thenReturn("otp-hash");
 
@@ -126,6 +129,23 @@ class AuthServiceTest {
         assertThat(result).containsEntry("mfaRequired", true).containsEntry("emailOtp", true)
                 .doesNotContainKey("demoOtp");
         verify(email).sendLoginOtp(eq(user.email()), eq(user.fullName()), anyString(), eq(300), eq(true));
+    }
+
+    @Test
+    void smsOtpTakesPrecedenceAndTextsTheRegisteredMobile() {
+        var user = user(true);
+        when(users.findByLoginId("ro.adyar")).thenReturn(Optional.of(user));
+        when(passwordCrypto.decrypt("encrypted")).thenReturn("Slate@123");
+        when(encoder.matches("Slate@123", user.passwordHash())).thenReturn(true);
+        when(config.flagEnabled("TN", AuthService.LOGIN_SMS_OTP)).thenReturn(true);
+        when(encoder.encode(anyString())).thenReturn("otp-hash");
+
+        var result = service.login("ro.adyar", "encrypted", "127.0.0.1", "test");
+
+        assertThat(result).containsEntry("otpChannel", "SMS").containsEntry("maskedMobile", "XXXXXX0001")
+                .doesNotContainKey("demoOtp");
+        verify(sms).sendLoginOtp(eq("9000000001"), anyString());
+        verify(email, never()).sendLoginOtp(anyString(), anyString(), anyString(), anyInt(), anyBoolean());
     }
 
     private UserRepository.UserRow user(boolean mfaRequired) {

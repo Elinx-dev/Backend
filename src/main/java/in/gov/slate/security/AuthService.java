@@ -26,6 +26,8 @@ public class AuthService {
 
     /** State admin flag: on = login codes are emailed, off = the mock code is accepted. */
     public static final String LOGIN_EMAIL_OTP = "LOGIN_EMAIL_OTP";
+    /** State admin flag: on = login codes are sent by SMS (takes precedence over email). */
+    public static final String LOGIN_SMS_OTP = "LOGIN_SMS_OTP";
 
     private static final int MAX_OTP_ATTEMPTS = 5;
 
@@ -36,6 +38,7 @@ public class AuthService {
     private final JwtService jwt;
     private final AuditService audit;
     private final ConfigService config;
+    private final SmsOtpSender sms;
     private final SecureRandom random = new SecureRandom();
     private final String demoOtp;
     private final int otpValiditySeconds;
@@ -43,6 +46,7 @@ public class AuthService {
 
     public AuthService(UserRepository users, PasswordEncoder encoder, PasswordCryptoService passwordCrypto,
                        AuthEmailService email, JwtService jwt, AuditService audit, ConfigService config,
+                       SmsOtpSender sms,
                        @Value("${slate.otp.officer-demo-otp}") String demoOtp,
                        @Value("${slate.otp.validity-seconds}") int otpValiditySeconds,
                        @Value("${slate.password-reset.validity-minutes}") int resetValidityMinutes) {
@@ -53,6 +57,7 @@ public class AuthService {
         this.jwt = jwt;
         this.audit = audit;
         this.config = config;
+        this.sms = sms;
         this.demoOtp = demoOtp;
         this.otpValiditySeconds = otpValiditySeconds;
         this.resetValidityMinutes = resetValidityMinutes;
@@ -75,30 +80,42 @@ public class AuthService {
         if (!user.mfaRequired()) {
             return issueToken(user, ip, userAgent, true);
         }
-        if (user.email() == null || user.email().isBlank()) {
+        // State admin flags: LOGIN_SMS_OTP = code by SMS, else LOGIN_EMAIL_OTP = code by email, else the mock code.
+        boolean sms = config.flagEnabled(user.stateCode(), LOGIN_SMS_OTP);
+        String mobile = SmsOtpSender.indianMobile(user.mobile());
+        if (sms && mobile == null) {
+            throw new ApiException(HttpStatus.CONFLICT, "MFA_MOBILE_MISSING",
+                    "No valid mobile number is configured for this account");
+        }
+        if (!sms && (user.email() == null || user.email().isBlank())) {
             throw new ApiException(HttpStatus.CONFLICT, "MFA_EMAIL_MISSING",
                     "No email address is configured for this account");
         }
-
-        // State admin flag: on = a random code is emailed to the user's address, off = the mock code.
-        boolean live = config.flagEnabled(user.stateCode(), LOGIN_EMAIL_OTP);
-        String otp = live ? String.format("%06d", random.nextInt(1_000_000)) : demoOtp;
+        boolean live = !sms && config.flagEnabled(user.stateCode(), LOGIN_EMAIL_OTP);
+        String otp = sms || live ? String.format("%06d", random.nextInt(1_000_000)) : demoOtp;
         UUID challengeId = UUID.randomUUID();
         OffsetDateTime expiresAt = OffsetDateTime.now(ZoneOffset.UTC).plusSeconds(otpValiditySeconds);
         users.createLoginOtp(user.id(), challengeId, encoder.encode(otp), expiresAt);
         audit.recordAs(user.stateCode(), "LOGIN_MFA_REQUESTED", "USER", String.valueOf(user.id()), null, null,
                 null, Map.of("username", user.username()), "SUCCESS", null);
-        if (live) {
+        if (sms) {
+            this.sms.sendLoginOtp(mobile, otp);
+        } else if (live) {
             email.sendLoginOtp(user.email(), user.fullName(), otp, otpValiditySeconds, true);
         }
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("mfaRequired", true);
         out.put("challengeId", challengeId.toString());
-        out.put("maskedEmail", maskEmail(user.email()));
+        if (sms) {
+            out.put("maskedMobile", maskMobile(mobile));
+        } else {
+            out.put("maskedEmail", maskEmail(user.email()));
+        }
         out.put("expiresAt", expiresAt.toString());
+        out.put("otpChannel", sms ? "SMS" : live ? "EMAIL" : "MOCK");
         out.put("emailOtp", live);
-        if (!live && email.exposesDemoSecrets(false)) {
+        if (!sms && !live && email.exposesDemoSecrets(false)) {
             out.put("demoOtp", otp);
         }
         return out;
