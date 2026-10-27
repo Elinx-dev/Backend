@@ -84,7 +84,8 @@ public class UserRepository {
     public List<Map<String, Object>> adminUsers(String stateCode) {
         return jdbc.queryForList("""
                 SELECT u.id, u.username, u.full_name, u.email, u.mobile, u.designation,
-                       u.department, u.state_code, u.status, u.mfa_required,
+                       u.department, u.state_code, u.status, u.mfa_required, u.lockout_enabled,
+                       u.locked_until, u.failed_login_count,
                        COALESCE(array_agg(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS roles
                   FROM sec.user u
                   LEFT JOIN sec.user_role ur ON ur.user_id = u.id
@@ -105,19 +106,19 @@ public class UserRepository {
     @Transactional
     public long createUser(String stateCode, String username, String fullName, String email, String mobile,
                            String designation, String department, String passwordHash, String status,
-                           boolean mfaRequired, List<String> roleCodes) {
+                           boolean mfaRequired, boolean lockoutEnabled, List<String> roleCodes) {
         long userId = jdbc.queryForObject("""
                 INSERT INTO sec.user (state_code, username, full_name, email, mobile, designation,
-                                     department, password_hash, status, mfa_required)
+                                     department, password_hash, status, mfa_required, lockout_enabled)
                 VALUES (:stateCode, :username, :fullName, :email, :mobile, :designation,
-                        :department, :passwordHash, :status, :mfaRequired)
+                        :department, :passwordHash, :status, :mfaRequired, :lockoutEnabled)
                 RETURNING id
                 """, new MapSqlParameterSource()
                 .addValue("stateCode", stateCode).addValue("username", username)
                 .addValue("fullName", fullName).addValue("email", email).addValue("mobile", mobile)
                 .addValue("designation", designation).addValue("department", department)
                 .addValue("passwordHash", passwordHash).addValue("status", status)
-                .addValue("mfaRequired", mfaRequired), Long.class);
+                .addValue("mfaRequired", mfaRequired).addValue("lockoutEnabled", lockoutEnabled), Long.class);
         replaceRoles(userId, roleCodes);
         return userId;
     }
@@ -125,18 +126,21 @@ public class UserRepository {
     @Transactional
     public void updateUser(long userId, String stateCode, String fullName, String email, String mobile,
                            String designation, String department, String status, boolean mfaRequired,
-                           List<String> roleCodes) {
+                           boolean lockoutEnabled, List<String> roleCodes) {
         jdbc.update("""
                 UPDATE sec.user
                    SET full_name = :fullName, email = :email, mobile = :mobile,
                        designation = :designation, department = :department,
-                       status = :status, mfa_required = :mfaRequired
+                       status = :status, mfa_required = :mfaRequired, lockout_enabled = :lockoutEnabled,
+                       failed_login_count = CASE WHEN :status = 'LOCKED' THEN failed_login_count ELSE 0 END,
+                       locked_until = CASE WHEN :status = 'LOCKED' THEN locked_until ELSE NULL END
                  WHERE id = :userId AND state_code = :stateCode
                 """, new MapSqlParameterSource()
                 .addValue("userId", userId).addValue("stateCode", stateCode)
                 .addValue("fullName", fullName).addValue("email", email).addValue("mobile", mobile)
                 .addValue("designation", designation).addValue("department", department)
-                .addValue("status", status).addValue("mfaRequired", mfaRequired));
+                .addValue("status", status).addValue("mfaRequired", mfaRequired)
+                .addValue("lockoutEnabled", lockoutEnabled));
         replaceRoles(userId, roleCodes);
     }
 
@@ -180,13 +184,25 @@ public class UserRepository {
                 """, new MapSqlParameterSource("userId", userId));
     }
 
-    public void recordLoginFailure(long userId) {
+    /** Counts a wrong password; the 5th locks the account for lockMinutes, unless the admin turned lockout off. */
+    public void recordLoginFailure(long userId, int lockMinutes) {
         jdbc.update("""
                 UPDATE sec.user
                    SET failed_login_count = failed_login_count + 1,
-                       status = CASE WHEN failed_login_count + 1 >= 5 THEN 'LOCKED' ELSE status END
+                       status = CASE WHEN lockout_enabled AND failed_login_count + 1 >= 5 THEN 'LOCKED' ELSE status END,
+                       locked_until = CASE WHEN lockout_enabled AND failed_login_count + 1 >= 5
+                                           THEN now() + make_interval(mins => :minutes) ELSE locked_until END
                  WHERE id = :id
-                """, new MapSqlParameterSource("id", userId));
+                """, new MapSqlParameterSource("id", userId).addValue("minutes", lockMinutes));
+    }
+
+    /** Unlocks an automatic lock whose time is over; a lock set by an admin (no locked_until) stays. */
+    public boolean releaseExpiredLock(long userId) {
+        return jdbc.update("""
+                UPDATE sec.user
+                   SET status = 'ACTIVE', failed_login_count = 0, locked_until = NULL
+                 WHERE id = :id AND status = 'LOCKED' AND locked_until IS NOT NULL AND locked_until <= now()
+                """, new MapSqlParameterSource("id", userId)) > 0;
     }
 
     public void recordLoginSuccess(long userId) {

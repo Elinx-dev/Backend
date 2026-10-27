@@ -180,6 +180,32 @@ public class ConsentService {
         return verificationResult(partyId, repository.load(txnRef, user.stateCode()), user);
     }
 
+    /** State-admin bulk upload: consent is recorded as given by the uploading admin, without an Aadhaar OTP. */
+    @Transactional
+    public Map<String, Object> recordBulkConsent(String txnRef) {
+        CurrentUser user = CurrentUser.require();
+        user.requirePermission("CONSENT_CAPTURE");
+        var ctx = repository.load(txnRef, user.stateCode());
+        workflow.requireStatus(ctx, "CONSENT_PENDING", "Bulk consent", user);
+        jdbc.update("""
+                INSERT INTO core.consent_record (transaction_id, party_id, aadhaar_hash, otp_request_reference, status,
+                       requested_at, verified_at, attempt_count, officer_user_id, consent_text_version, otp_mode)
+                SELECT p.transaction_id, p.id, p.aadhaar_hash, 'BULK-' || :txnRef || '-' || p.id, 'VERIFIED',
+                       now(), now(), 0, :userId, :version, 'BULK_ADMIN'
+                  FROM core.transaction_party p
+                 WHERE p.transaction_id = :txnId
+                   AND NOT EXISTS (SELECT 1 FROM core.consent_record c WHERE c.party_id = p.id)
+                """, new MapSqlParameterSource().addValue("txnRef", txnRef).addValue("txnId", ctx.id())
+                .addValue("userId", user.id()).addValue("version", consentTextVersion()));
+        for (Long partyId : jdbc.queryForList("SELECT id FROM core.transaction_party WHERE transaction_id = :txnId",
+                new MapSqlParameterSource("txnId", ctx.id()), Long.class)) {
+            transactions.forgetPartyAadhaar(partyId);
+        }
+        audit.record("CONSENT_BULK_RECORDED", "CONSENT", txnRef, txnRef, ctx.propertyRef(),
+                null, Map.of("mode", "BULK_ADMIN"), "SUCCESS", null);
+        return verificationResult(0L, repository.load(txnRef, user.stateCode()), user);
+    }
+
     public List<Map<String, Object>> status(String txnRef) {
         CurrentUser user = CurrentUser.require();
         var ctx = repository.load(txnRef, user.stateCode());

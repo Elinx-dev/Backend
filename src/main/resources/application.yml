@@ -70,6 +70,9 @@ slate:
       tenant-id: ${SLATE_GRAPH_TENANT_ID:}
       client-id: ${SLATE_GRAPH_CLIENT_ID:}
       client-secret: ${SLATE_GRAPH_CLIENT_SECRET:}
+  login-lockout:
+    # After 5 wrong passwords a user with lockout on cannot sign in for this long (state admin can unlock earlier).
+    minutes: ${SLATE_LOGIN_LOCKOUT_MINUTES:120}
   sms:
     # 2Factor.in, used for the login code once a state's LOGIN_SMS_OTP flag is on.
     two-factor:

@@ -1,6 +1,7 @@
 package in.gov.slate.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -53,7 +54,7 @@ class AuthServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AuthService(users, encoder, passwordCrypto, email, jwt, audit, config, sms, "123456", 300, 15);
+        service = new AuthService(users, encoder, passwordCrypto, email, jwt, audit, config, sms, "123456", 300, 15, 120);
     }
 
     @Test
@@ -146,6 +147,21 @@ class AuthServiceTest {
                 .doesNotContainKey("demoOtp");
         verify(sms).sendLoginOtp(eq("9000000001"), anyString());
         verify(email, never()).sendLoginOtp(anyString(), anyString(), anyString(), anyInt(), anyBoolean());
+    }
+
+    @Test
+    void expiredLockoutIsReleasedAndLoginContinues() {
+        var locked = new UserRepository.UserRow(1L, "ro.adyar", "R. Anandhi", "ro.adyar@tn.demo.slate", "9000000001",
+                "Sub-Registrar", "REGISTRATION", "TN", "old-hash", false, "LOCKED", 5);
+        var active = user(false);
+        when(users.findByLoginId("ro.adyar")).thenReturn(Optional.of(locked), Optional.of(active));
+        when(users.releaseExpiredLock(1L)).thenReturn(true);
+        when(passwordCrypto.decrypt("encrypted")).thenReturn("Wrong@123");
+        when(encoder.matches("Wrong@123", active.passwordHash())).thenReturn(false);
+
+        assertThatThrownBy(() -> service.login("ro.adyar", "encrypted", "127.0.0.1", "test"))
+                .hasMessageContaining("Invalid username or password");
+        verify(users).recordLoginFailure(1L, 120);
     }
 
     private UserRepository.UserRow user(boolean mfaRequired) {
