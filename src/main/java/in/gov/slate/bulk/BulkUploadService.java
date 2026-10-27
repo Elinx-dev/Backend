@@ -315,7 +315,7 @@ public class BulkUploadService {
             long ownerId = ((Number) owners.get(0).get("id")).longValue();
             transactions.saveParties(txnRef, List.of(
                     new TransactionService.PartyInput("SIDE_1", null, null, null, null, null, null, null, null, null, null,
-                            null, null, null, null, null, ownerId),
+                            null, null, null, extent, null, ownerId),
                     new TransactionService.PartyInput("SIDE_2", null, null, "INDIVIDUAL", c.get("buyer_name"),
                             c.get("buyer_aadhaar"), null, null, blank(c.get("buyer_pan")), blank(c.get("buyer_mobile")),
                             c.get("buyer_address"), null, null, blank(c.get("relationship_code")), extent, null, null)));
