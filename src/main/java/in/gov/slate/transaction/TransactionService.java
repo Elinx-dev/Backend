@@ -417,7 +417,8 @@ public class TransactionService {
             out.add(new PartyInput("SIDE_1", null, ownerPartyType(ownerType), ownerType,
                     (String) o.get("owner_name"), (String) o.get("aadhaar_number"), null, null,
                     (String) o.get("pan"), (String) o.get("mobile"), (String) o.get("address"),
-                    (String) o.get("registration_no"), rep, null, null, null, ((Number) o.get("id")).longValue()));
+                    (String) o.get("registration_no"), rep, null, side1Extent(parties, ((Number) o.get("id")).longValue()),
+                    null, ((Number) o.get("id")).longValue()));
         }
         parties.stream().filter(p -> !"SIDE_1".equals(p.side()))
                 .map(p -> p.ownerTypeCode() == null ? p : new PartyInput(p.side(), p.role(),
@@ -427,6 +428,12 @@ public class TransactionService {
                         p.authorityPoaReference(), null))
                 .forEach(out::add);
         return out;
+    }
+
+    private static BigDecimal side1Extent(List<PartyInput> parties, long ownerId) {
+        return parties.stream()
+                .filter(p -> "SIDE_1".equals(p.side()) && p.propertyOwnerId() != null && p.propertyOwnerId() == ownerId)
+                .map(PartyInput::extentTransferred).filter(java.util.Objects::nonNull).findFirst().orElse(null);
     }
 
     /**
