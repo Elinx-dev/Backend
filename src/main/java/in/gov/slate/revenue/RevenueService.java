@@ -224,10 +224,37 @@ public class RevenueService {
     /** Only the Tahsildar issues the authoritative Revenue decision. */
     @Transactional
     public Map<String, Object> approve(long mutationId, ApprovalRequest req) {
+        return approve(mutationId, req, false);
+    }
+
+    /**
+     * State-admin bulk upload: the deed passed its rule checks, so the mutation is forwarded and approved
+     * without the VAO field visit or a Tahsildar review.
+     */
+    @Transactional
+    public Map<String, Object> completeWithoutFieldWork(long mutationId, String remarks) {
         CurrentUser user = CurrentUser.require();
         user.requirePermission("REVENUE_APPROVE");
         Map<String, Object> mutation = detail(mutationId);
-        requireApprovalReady(mutationId);
+        requireStatus(mutation, "VAO_PENDING");
+        jdbc.update("""
+                UPDATE revenue.proposed_mutation SET vao_verified_by = :userId, vao_verified_at = now(),
+                       vao_remarks = :remarks, status = 'TAHSILDAR_PENDING'
+                 WHERE id = :id
+                """, new MapSqlParameterSource().addValue("id", mutationId).addValue("userId", user.id())
+                .addValue("remarks", remarks));
+        TransactionContext ctx = repository.load((String) mutation.get("txn_ref"), user.stateCode());
+        workflow.apply(ctx, "VAO_FORWARD", remarks, user);
+        return approve(mutationId, new ApprovalRequest(null, remarks), true);
+    }
+
+    private Map<String, Object> approve(long mutationId, ApprovalRequest req, boolean bulk) {
+        CurrentUser user = CurrentUser.require();
+        user.requirePermission("REVENUE_APPROVE");
+        Map<String, Object> mutation = detail(mutationId);
+        if (!bulk) {
+            requireApprovalReady(mutationId);
+        }
 
         TransactionContext ctx = repository.load((String) mutation.get("txn_ref"), user.stateCode());
         MutationPushResponse pushed = connector.pushMutation(new MutationPushRequest(
