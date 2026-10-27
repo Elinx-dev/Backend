@@ -43,13 +43,15 @@ public class AuthService {
     private final String demoOtp;
     private final int otpValiditySeconds;
     private final int resetValidityMinutes;
+    private final int lockoutMinutes;
 
     public AuthService(UserRepository users, PasswordEncoder encoder, PasswordCryptoService passwordCrypto,
                        AuthEmailService email, JwtService jwt, AuditService audit, ConfigService config,
                        SmsOtpSender sms,
                        @Value("${slate.otp.officer-demo-otp}") String demoOtp,
                        @Value("${slate.otp.validity-seconds}") int otpValiditySeconds,
-                       @Value("${slate.password-reset.validity-minutes}") int resetValidityMinutes) {
+                       @Value("${slate.password-reset.validity-minutes}") int resetValidityMinutes,
+                       @Value("${slate.login-lockout.minutes:120}") int lockoutMinutes) {
         this.users = users;
         this.encoder = encoder;
         this.passwordCrypto = passwordCrypto;
@@ -61,17 +63,22 @@ public class AuthService {
         this.demoOtp = demoOtp;
         this.otpValiditySeconds = otpValiditySeconds;
         this.resetValidityMinutes = resetValidityMinutes;
+        this.lockoutMinutes = lockoutMinutes;
     }
 
-    @Transactional
+    // Wrong-password / wrong-OTP counts and their audit rows must survive the error thrown to the caller.
+    @Transactional(noRollbackFor = ApiException.class)
     public Map<String, Object> login(String loginId, String encryptedPassword, String ip, String userAgent) {
         var user = users.findByLoginId(loginId)
                 .orElseThrow(this::invalidCredentials);
+        if ("LOCKED".equals(user.status()) && users.releaseExpiredLock(user.id())) {
+            user = users.findByLoginId(loginId).orElseThrow(this::invalidCredentials);
+        }
         requireActive(user);
 
         String password = passwordCrypto.decrypt(encryptedPassword);
         if (!encoder.matches(password, user.passwordHash())) {
-            users.recordLoginFailure(user.id());
+            users.recordLoginFailure(user.id(), lockoutMinutes);
             audit.recordAs(user.stateCode(), "LOGIN", "USER", String.valueOf(user.id()), null, null, null,
                     Map.of("username", user.username()), "FAILURE", "Password mismatch");
             throw invalidCredentials();
@@ -121,7 +128,8 @@ public class AuthService {
         return out;
     }
 
-    @Transactional
+    // Wrong-password / wrong-OTP counts and their audit rows must survive the error thrown to the caller.
+    @Transactional(noRollbackFor = ApiException.class)
     public Map<String, Object> verifyMfa(String challengeIdValue, String otp, String ip, String userAgent) {
         UUID challengeId = parseUuid(challengeIdValue, "Invalid MFA challenge");
         var challenge = users.findLoginOtpForUpdate(challengeId)

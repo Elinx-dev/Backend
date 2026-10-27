@@ -47,7 +47,12 @@ public class AdminController {
                               @Size(max = 320) String email, @Size(max = 40) String mobile,
                               @Size(max = 120) String designation, @NotBlank String department,
                               @NotBlank String status, boolean mfaRequired,
-                              @NotEmpty List<String> roles, @Size(min = 8, max = 128) String password) {
+                              @NotEmpty List<String> roles, @Size(min = 8, max = 128) String password,
+                              Boolean lockoutEnabled) {
+        /** Lock after 5 wrong passwords; on unless the admin switches it off. */
+        public boolean lockout() {
+            return !Boolean.FALSE.equals(lockoutEnabled);
+        }
     }
 
     @GetMapping("/states")
@@ -79,7 +84,7 @@ public class AdminController {
         long id = users.createUser(targetState, request.username().trim(), request.fullName().trim(),
                 blankToNull(request.email()), blankToNull(request.mobile()), blankToNull(request.designation()),
                 request.department(), encoder.encode(request.password()), request.status(), request.mfaRequired(),
-                request.roles());
+                request.lockout(), request.roles());
         audit.record(AuditEvent.of("USER_CREATED").stateCode(targetState)
                 .category(AuditEvent.CATEGORY_SECURITY)
                 .entity("USER", String.valueOf(id))
@@ -107,7 +112,7 @@ public class AdminController {
         }
         users.updateUser(id, targetState, request.fullName().trim(), blankToNull(request.email()),
                 blankToNull(request.mobile()), blankToNull(request.designation()), request.department(),
-                request.status(), request.mfaRequired(), request.roles());
+                request.status(), request.mfaRequired(), request.lockout(), request.roles());
         audit.record(AuditEvent.of("USER_UPDATED").stateCode(targetState)
                 .category(AuditEvent.CATEGORY_SECURITY)
                 .entity("USER", String.valueOf(id))
@@ -125,7 +130,7 @@ public class AdminController {
     private Map<String, Object> snapshot(UserRequest request) {
         return Map.of("username", request.username().trim(), "fullName", request.fullName().trim(),
                 "department", request.department(), "status", request.status(),
-                "mfaRequired", request.mfaRequired(), "roles", request.roles());
+                "mfaRequired", request.mfaRequired(), "lockoutEnabled", request.lockout(), "roles", request.roles());
     }
 
     private Map<String, Object> snapshot(UserRepository.UserRow user) {
