@@ -793,5 +793,573 @@
     "periodTo": "2026-02-01",
     "coverageStatus": "FULL",
     "entries": []
+  },
+  "PERUNGUDI|701|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00701",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|702|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00702",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|703|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00703",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|704|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00704",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|705|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00705",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|706|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00706",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|707|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00707",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|711|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00711",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": [
+      {
+        "entryNo": "1",
+        "entryDate": "2021-11-19",
+        "nature": "Order of Attachment - District Munsif Court",
+        "documentNo": "OS-441/2021",
+        "previousDocumentReference": null,
+        "executants": [
+          "District Munsif Court, Chengalpattu"
+        ],
+        "claimants": [
+          "Thangaraj Pillai"
+        ],
+        "amount": null,
+        "lender": null,
+        "schedule": {
+          "village": "PERUNGUDI",
+          "surveyNo": "711",
+          "subdivisionNo": "1",
+          "extent": 2400,
+          "extentUnit": "SQ_FT",
+          "doorNo": "711",
+          "plotNo": null,
+          "boundaries": "N: Road, S: Canal, E: Plot, W: Plot"
+        },
+        "remarks": "Interim order in a partition suit"
+      }
+    ]
+  },
+  "PERUNGUDI|712|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00712",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": [
+      {
+        "entryNo": "1",
+        "entryDate": "2019-03-12",
+        "nature": "Deposit of Title Deeds / Simple Mortgage",
+        "documentNo": "1188/2019",
+        "previousDocumentReference": null,
+        "executants": [
+          "Saravanan Muthu"
+        ],
+        "claimants": [
+          "Kanchi Co-operative Bank"
+        ],
+        "amount": 1800000,
+        "lender": "Kanchi Co-operative Bank",
+        "schedule": {
+          "village": "PERUNGUDI",
+          "surveyNo": "712",
+          "subdivisionNo": "1",
+          "extent": 2400,
+          "extentUnit": "SQ_FT",
+          "doorNo": "712",
+          "plotNo": "12",
+          "boundaries": "N: Road, S: Canal, E: Plot, W: Plot"
+        },
+        "remarks": "Mortgage created in favour of the bank"
+      }
+    ]
+  },
+  "PERUNGUDI|713|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00713",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|714|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00714",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|715|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00715",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|716|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00716",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|718|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00718",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|801|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00801",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|802|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00802",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|803|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00803",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|804|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00804",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|805|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00805",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|806|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00806",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|807|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00807",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|808|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00808",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|809|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00809",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|810|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00810",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|811|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00811",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|812|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00812",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|813|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00813",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|814|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00814",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|815|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00815",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|816|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00816",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|817|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00817",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|818|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00818",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": [
+      {
+        "entryNo": "1",
+        "entryDate": "2021-11-19",
+        "nature": "Order of Attachment - District Munsif Court",
+        "documentNo": "OS-441/2021",
+        "previousDocumentReference": null,
+        "executants": [
+          "District Munsif Court, Chengalpattu"
+        ],
+        "claimants": [
+          "Thangaraj Pillai"
+        ],
+        "amount": null,
+        "lender": null,
+        "schedule": {
+          "village": "PERUNGUDI",
+          "surveyNo": "818",
+          "subdivisionNo": "1",
+          "extent": 2400,
+          "extentUnit": "SQ_FT",
+          "doorNo": "818",
+          "plotNo": null,
+          "boundaries": "N: Road, S: Canal, E: Plot, W: Plot"
+        },
+        "remarks": "Interim order in a partition suit"
+      }
+    ]
+  },
+  "PERUNGUDI|819|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00819",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": [
+      {
+        "entryNo": "1",
+        "entryDate": "2019-03-12",
+        "nature": "Deposit of Title Deeds / Simple Mortgage",
+        "documentNo": "1188/2019",
+        "previousDocumentReference": null,
+        "executants": [
+          "Uma Maheswari"
+        ],
+        "claimants": [
+          "Kanchi Co-operative Bank"
+        ],
+        "amount": 1800000,
+        "lender": "Kanchi Co-operative Bank",
+        "schedule": {
+          "village": "PERUNGUDI",
+          "surveyNo": "819",
+          "subdivisionNo": "1",
+          "extent": 2400,
+          "extentUnit": "SQ_FT",
+          "doorNo": "819",
+          "plotNo": "12",
+          "boundaries": "N: Road, S: Canal, E: Plot, W: Plot"
+        },
+        "remarks": "Mortgage created in favour of the bank"
+      }
+    ]
+  },
+  "PERUNGUDI|820|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00820",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|821|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00821",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|822|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00822",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|823|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00823",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|824|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00824",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|825|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00825",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|826|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00826",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|827|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00827",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|828|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00828",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|829|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00829",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|830|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00830",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|708|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00708",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
+  },
+  "PERUNGUDI|709|1": {
+    "responseStatus": "AVAILABLE",
+    "certificateNo": "EC/TN/CHN/2026/00709",
+    "issuedBy": "SRO Adyar",
+    "issuedOn": "2026-02-01",
+    "periodFrom": "1996-01-01",
+    "periodTo": "2026-02-01",
+    "coverageStatus": "FULL",
+    "entries": []
   }
 }
