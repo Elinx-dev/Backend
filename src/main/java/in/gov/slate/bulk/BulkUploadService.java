@@ -94,7 +94,7 @@ public class BulkUploadService {
             col("buyer_mobile", "10-digit mobile, optional", false),
             col("buyer_address", "Address", true),
             col("relationship_category", "Not used: Gift and Release use the non-family rate, Settlement the family rate", false),
-            col("relationship_code", "SETTLEMENT: blood relation, e.g. SON, DAUGHTER", false),
+            col("relationship_code", "GIFT and SETTLEMENT: relationship of the buyer, e.g. SON, DAUGHTER", false),
             col("consideration", "SALE: amount in rupees (> 0); others 0", true),
             col("consideration_mode", "Optional: BANK_TRANSFER, CHEQUE, DD or CASH", false),
             col("witness1_name", "Witness 1 name", true),
@@ -519,8 +519,8 @@ public class BulkUploadService {
                     && number(v.get("consideration")).signum() <= 0) {
                 errors.add(error(n, "consideration", "A sale needs a consideration amount above 0"));
             }
-            if ("SETTLEMENT".equals(deed) && v.get("relationship_code").isEmpty()) {
-                errors.add(error(n, "relationship_code", "SETTLEMENT needs the blood relation, e.g. SON"));
+            if (("GIFT".equals(deed) || "SETTLEMENT".equals(deed)) && v.get("relationship_code").isEmpty()) {
+                errors.add(error(n, "relationship_code", deed + " needs the relationship of the buyer, e.g. SON"));
             }
             for (String k : List.of("seller_aadhaar", "buyer_aadhaar")) {
                 v.put(k, v.get(k).replaceAll("[\\s-]", ""));
