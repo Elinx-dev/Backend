@@ -640,7 +640,8 @@ public class RevenueOwnershipEngine implements RuleEngine {
     }
 
     /**
-     * The owner side comes from the transaction type master; each party on it must have a
+     * The owner side comes from the transaction type master, plus any other party that is a current
+     * property owner (Release releasees); each party on it must have a
      * verified Aadhaar consent, and that party's name is the Aadhaar-verified name.
      */
     static OwnerSide ownerSide(TransactionContext ctx) {
@@ -649,7 +650,11 @@ public class RevenueOwnershipEngine implements RuleEngine {
             return new OwnerSide(List.of(), "OWNER_SIDE_NOT_CONFIGURED",
                     "master.transaction_type has no owner side for " + ctx.deedTypeCode());
         }
-        List<Map<String, Object>> parties = ctx.side(side.toString());
+        List<Map<String, Object>> parties = new ArrayList<>(ctx.side(side.toString()));
+        // A Release is between co-owners: the releasees are current owners too and stay on the patta.
+        ctx.parties().stream()
+                .filter(p -> !side.toString().equals(p.get("side")) && p.get("property_owner_id") != null)
+                .forEach(parties::add);
         if (parties.isEmpty()) {
             return new OwnerSide(List.of(), "OWNER_SIDE_PARTIES_MISSING", "The transaction has no owner-side party");
         }

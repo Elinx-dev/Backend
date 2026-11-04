@@ -1253,6 +1253,11 @@
         "relationType": null,
         "relatedPersonName": null,
         "sharePct": null
+      }, {
+        "name": "Ramesh Kumar",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
       }
     ],
     "sourceReference": "TN-REVENUE-API/PATTA/PER/1706",
@@ -1693,6 +1698,11 @@
         "relationType": null,
         "relatedPersonName": null,
         "sharePct": null
+      }, {
+        "name": "Mohan Raj",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
       }
     ],
     "sourceReference": "TN-REVENUE-API/PATTA/PER/1813",
@@ -1712,6 +1722,11 @@
     "owners": [
       {
         "name": "Omkar Pandian",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }, {
+        "name": "Nisha K",
         "relationType": null,
         "relatedPersonName": null,
         "sharePct": null
@@ -1737,6 +1752,11 @@
         "relationType": null,
         "relatedPersonName": null,
         "sharePct": null
+      }, {
+        "name": "Pradeep S",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
       }
     ],
     "sourceReference": "TN-REVENUE-API/PATTA/PER/1815",
@@ -1756,6 +1776,11 @@
     "owners": [
       {
         "name": "Raghu Raman",
+        "relationType": null,
+        "relatedPersonName": null,
+        "sharePct": null
+      }, {
+        "name": "Rani M",
         "relationType": null,
         "relatedPersonName": null,
         "sharePct": null

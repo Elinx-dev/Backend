@@ -113,12 +113,15 @@ public class TransactionService {
         user.requirePermission("TXN_CREATE");
 
         var propertyRows = jdbc.queryForList(
-                "SELECT id, property_ref, sro_code, district_code, owner_type_code FROM core.property WHERE property_ref = :ref AND state_code = :state",
+                "SELECT id, property_ref, sro_code, district_code, owner_type_code, land_type_code FROM core.property WHERE property_ref = :ref AND state_code = :state",
                 new MapSqlParameterSource().addValue("ref", req.propertyRef()).addValue("state", user.stateCode()));
         if (propertyRows.isEmpty()) {
             throw ApiException.notFound("Property " + req.propertyRef());
         }
         Map<String, Object> property = propertyRows.get(0);
+        if ("RELEASE".equals(req.deedTypeCode())) {
+            requireCoOwners(property);
+        }
 
         Map<String, Object> deedType = config.deedType(user.stateCode(), req.deedTypeCode());
         String transferScope;
@@ -141,13 +144,15 @@ public class TransactionService {
             subdivisionRequired = decision.subdivisionRequired();
             surveyRequiredByParty = decision.surveyRequiredByParty();
             Object defaultCategory = transactionType.get("default_relationship_category");
-            if (defaultCategory != null && (Boolean.TRUE.equals(transactionType.get("blood_relation_required"))
-                    || relationshipCategory == null || relationshipCategory.isBlank())) {
+            if (defaultCategory != null) {
                 relationshipCategory = (String) defaultCategory;
             }
             if (surveyRequired) {
                 surveyorUserId = requireSurveyor(user.stateCode(), req.surveyorUserId());
-                surveyLocationType = requireSurveyLocation(user.stateCode(), req.surveyLocationType());
+                surveyLocationType = requireSurveyLocation(user.stateCode(),
+                        req.surveyLocationType() == null || req.surveyLocationType().isBlank()
+                                ? surveyLocationFor(user.stateCode(), (String) property.get("land_type_code"))
+                                : req.surveyLocationType());
             }
         } else {
             transferScope = resolveTransferScope(req.deedTypeCode(), req.subtype(), req.transferScope());
@@ -228,6 +233,41 @@ public class TransactionService {
         return surveyorUserId;
     }
 
+    /** The survey fee location follows the property's land type (Rural → Village, Urban → Town). */
+    private String surveyLocationFor(String stateCode, String landTypeCode) {
+        List<String> rows = jdbc.queryForList("""
+                SELECT location_type FROM master.survey_fee
+                 WHERE state_code IN (:stateCode, '*') AND land_type_code = :landType AND status = 'ACTIVE'
+                 ORDER BY (state_code = '*'), display_order LIMIT 1
+                """, new MapSqlParameterSource().addValue("stateCode", stateCode).addValue("landType", landTypeCode),
+                String.class);
+        if (rows.isEmpty()) {
+            throw ApiException.badRequest("No survey fee is configured for land type "
+                    + (landTypeCode == null ? "(not set on the property)" : landTypeCode));
+        }
+        return rows.get(0);
+    }
+
+    private void requireCoOwners(Map<String, Object> property) {
+        Integer owners = jdbc.queryForObject("""
+                SELECT count(*) FROM core.property_owner WHERE property_id = :id AND effective_to IS NULL
+                """, new MapSqlParameterSource("id", property.get("id")), Integer.class);
+        if (owners == null || owners < 2) {
+            throw ApiException.badRequest("Release needs a property with two or more co-owners; "
+                    + property.get("property_ref") + " has " + (owners == null ? 0 : owners) + " owner(s)");
+        }
+    }
+
+    /** A transaction type with a default relationship category (Settlement, Gift, Release) always uses it. */
+    private String effectiveRelationshipCategory(String stateCode, String deedTypeCode, String requested) {
+        if (!config.isConfiguredTransactionType(stateCode, deedTypeCode)) {
+            return requested;
+        }
+        Map<String, Object> type = config.transactionType(stateCode, deedTypeCode);
+        Object defaultCategory = type == null ? null : type.get("default_relationship_category");
+        return defaultCategory != null ? (String) defaultCategory : requested;
+    }
+
     private String requireSurveyLocation(String stateCode, String locationType) {
         if (locationType == null || locationType.isBlank()) {
             throw ApiException.badRequest("Select the survey location type so the survey fee can be applied");
@@ -264,7 +304,9 @@ public class TransactionService {
         user.requirePermission("TXN_EDIT");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
         requireEditable(ctx);
-        requireRelationshipCategory(user.stateCode(), ctx.deedTypeCode(), req.relationshipCategory());
+        String relationshipCategory = effectiveRelationshipCategory(user.stateCode(), ctx.deedTypeCode(),
+                req.relationshipCategory());
+        requireRelationshipCategory(user.stateCode(), ctx.deedTypeCode(), relationshipCategory);
 
         jdbc.update("""
                 UPDATE core.transaction SET
@@ -286,7 +328,7 @@ public class TransactionService {
                 .addValue("mode", req.modeOfConsideration())
                 .addValue("extent", req.extentOrShareTransferred())
                 .addValue("extentUnit", req.extentUnit())
-                .addValue("relationshipCategory", req.relationshipCategory())
+                .addValue("relationshipCategory", relationshipCategory)
                 .addValue("basis", req.basisOfSettlement())
                 .addValue("shareReleased", req.shareBeingReleased())
                 .addValue("subparcels", req.resultingSubparcelCount())
@@ -406,21 +448,16 @@ public class TransactionService {
         if (chosen.isEmpty()) {
             throw ApiException.badRequest("Property " + ctx.propertyRef() + " has no recorded owners");
         }
+        boolean release = "RELEASE".equals(ctx.deedTypeCode());
+        List<Map<String, Object>> releasees = release ? releasees(ctx, parties, owners, selected) : List.of();
         List<PartyInput> out = new java.util.ArrayList<>();
         for (Map<String, Object> o : chosen) {
-            String ownerType = (String) o.get("owner_type_code");
-            String repName = (String) o.get("representative_name");
-            PropertyService.RepresentativeInput rep = repName == null ? null
-                    : new PropertyService.RepresentativeInput(repName, (String) o.get("representative_designation"),
-                            (String) o.get("representative_aadhaar"), (String) o.get("representative_pan"),
-                            (String) o.get("representative_mobile"));
-            out.add(new PartyInput("SIDE_1", null, ownerPartyType(ownerType), ownerType,
-                    (String) o.get("owner_name"), (String) o.get("aadhaar_number"), null, null,
-                    (String) o.get("pan"), (String) o.get("mobile"), (String) o.get("address"),
-                    (String) o.get("registration_no"), rep, null, side1Extent(parties, ((Number) o.get("id")).longValue()),
-                    null, ((Number) o.get("id")).longValue()));
+            out.add(ownerParty("SIDE_1", o, side1Extent(parties, ((Number) o.get("id")).longValue())));
         }
-        parties.stream().filter(p -> !"SIDE_1".equals(p.side()))
+        for (Map<String, Object> o : releasees) {
+            out.add(ownerParty("SIDE_2", o, null));
+        }
+        parties.stream().filter(p -> !"SIDE_1".equals(p.side()) && !release)
                 .map(p -> p.ownerTypeCode() == null ? p : new PartyInput(p.side(), p.role(),
                         ownerPartyType(p.ownerTypeCode()), p.ownerTypeCode(), p.name(), p.aadhaarNumber(),
                         p.kartaName(), p.kartaAadhaarNumber(), p.pan(), p.mobile(), p.address(),
@@ -428,6 +465,52 @@ public class TransactionService {
                         p.authorityPoaReference(), null))
                 .forEach(out::add);
         return out;
+    }
+
+    /**
+     * Release is between current co-owners only: releasors (SIDE_1) leave the title and the releasees
+     * (SIDE_2) are the co-owners who stay. Both are picked by propertyOwnerId.
+     */
+    private static List<Map<String, Object>> releasees(TransactionContext ctx, List<PartyInput> parties,
+                                                       List<Map<String, Object>> owners, java.util.Set<Long> releasors) {
+        if (releasors.isEmpty()) {
+            throw ApiException.badRequest("Select the releasor(s) from the current co-owners");
+        }
+        java.util.Set<Long> ids = new java.util.LinkedHashSet<>();
+        for (PartyInput p : parties) {
+            if ("SIDE_1".equals(p.side())) {
+                continue;
+            }
+            if (p.propertyOwnerId() == null) {
+                throw ApiException.badRequest("A releasee must be one of the current co-owners of " + ctx.propertyRef());
+            }
+            ids.add(p.propertyOwnerId());
+        }
+        if (ids.isEmpty()) {
+            throw ApiException.badRequest("Select at least one releasee from the remaining co-owners");
+        }
+        if (ids.stream().anyMatch(releasors::contains)) {
+            throw ApiException.badRequest("A co-owner cannot be both releasor and releasee");
+        }
+        List<Map<String, Object>> out = owners.stream()
+                .filter(o -> ids.contains(((Number) o.get("id")).longValue())).toList();
+        if (out.size() != ids.size()) {
+            throw ApiException.badRequest("Selected releasee is not a current owner of property " + ctx.propertyRef());
+        }
+        return out;
+    }
+
+    private static PartyInput ownerParty(String side, Map<String, Object> o, BigDecimal extent) {
+        String ownerType = (String) o.get("owner_type_code");
+        String repName = (String) o.get("representative_name");
+        PropertyService.RepresentativeInput rep = repName == null ? null
+                : new PropertyService.RepresentativeInput(repName, (String) o.get("representative_designation"),
+                        (String) o.get("representative_aadhaar"), (String) o.get("representative_pan"),
+                        (String) o.get("representative_mobile"));
+        return new PartyInput(side, null, ownerPartyType(ownerType), ownerType,
+                (String) o.get("owner_name"), (String) o.get("aadhaar_number"), null, null,
+                (String) o.get("pan"), (String) o.get("mobile"), (String) o.get("address"),
+                (String) o.get("registration_no"), rep, null, extent, null, ((Number) o.get("id")).longValue());
     }
 
     private static BigDecimal side1Extent(List<PartyInput> parties, long ownerId) {

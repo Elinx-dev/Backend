@@ -93,10 +93,10 @@ public class BulkUploadService {
             col("buyer_pan", "e.g. PQRSX6789K, optional", false),
             col("buyer_mobile", "10-digit mobile, optional", false),
             col("buyer_address", "Address", true),
-            col("relationship_category", "GIFT/SETTLEMENT: FAMILY or NON_FAMILY; RELEASE: CO_OWNER; SALE: blank", false),
+            col("relationship_category", "Not used: Gift and Release use the non-family rate, Settlement the family rate", false),
             col("relationship_code", "SETTLEMENT: blood relation, e.g. SON, DAUGHTER", false),
             col("consideration", "SALE: amount in rupees (> 0); others 0", true),
-            col("consideration_mode", "SALE: BANK_TRANSFER, CHEQUE, DD or CASH", false),
+            col("consideration_mode", "Optional: BANK_TRANSFER, CHEQUE, DD or CASH", false),
             col("witness1_name", "Witness 1 name", true),
             col("witness1_address", "Witness 1 address", true),
             col("witness2_name", "Witness 2 name", true),
@@ -267,6 +267,24 @@ public class BulkUploadService {
         return out;
     }
 
+    /** The seller is minted as owner; for a Release the releasee (buyer columns) is minted as co-owner too. */
+    private static List<PropertyService.OwnerInput> owners(Map<String, String> c) {
+        var seller = new PropertyService.OwnerInput(c.get("seller_name"), c.get("seller_aadhaar"),
+                blank(c.get("seller_pan")), blank(c.get("seller_mobile")), c.get("seller_address"), null, null);
+        if (!"RELEASE".equals(c.get("deed_type"))) {
+            return List.of(seller);
+        }
+        return List.of(seller, new PropertyService.OwnerInput(c.get("buyer_name"), c.get("buyer_aadhaar"),
+                blank(c.get("buyer_pan")), blank(c.get("buyer_mobile")), c.get("buyer_address"), null, null));
+    }
+
+    private static long ownerId(List<Map<String, Object>> owners, String name) {
+        return owners.stream()
+                .filter(o -> name.trim().equalsIgnoreCase(String.valueOf(o.get("owner_name")).trim()))
+                .map(o -> ((Number) o.get("id")).longValue())
+                .findFirst().orElseGet(() -> ((Number) owners.get(0).get("id")).longValue());
+    }
+
     private static Set<String> union(Set<String> a, Set<String> b) {
         Set<String> s = new HashSet<>(a);
         s.addAll(b);
@@ -287,8 +305,7 @@ public class BulkUploadService {
                     c.get("village_code"), c.get("sro_code"), null, null, blank(c.get("street")),
                     blank(c.get("door_no")), c.get("boundary_north"), c.get("boundary_south"), c.get("boundary_east"),
                     c.get("boundary_west"), new BigDecimal(c.get("guideline_value")), null, false, null,
-                    List.of(new PropertyService.OwnerInput(c.get("seller_name"), c.get("seller_aadhaar"),
-                            blank(c.get("seller_pan")), blank(c.get("seller_mobile")), c.get("seller_address"), null, null)),
+                    owners(c),
                     List.of(new PropertyService.BoundaryMeasurementInput("NORTH", "SOUTH",
                                     new BigDecimal(c.get("length_north_south_ft")), "FT"),
                             new PropertyService.BoundaryMeasurementInput("EAST", "WEST",
@@ -312,8 +329,15 @@ public class BulkUploadService {
             r.put("txnRef", txnRef);
             @SuppressWarnings("unchecked")
             var owners = (List<Map<String, Object>>) properties.get(propertyRef).get("registeredOwners");
-            long ownerId = ((Number) owners.get(0).get("id")).longValue();
-            transactions.saveParties(txnRef, List.of(
+            long ownerId = ownerId(owners, c.get("seller_name"));
+            // Release is between co-owners: the buyer columns name the co-owner who stays (releasee).
+            transactions.saveParties(txnRef, "RELEASE".equals(deed)
+                    ? List.of(
+                            new TransactionService.PartyInput("SIDE_1", null, null, null, null, null, null, null, null,
+                                    null, null, null, null, null, null, null, ownerId),
+                            new TransactionService.PartyInput("SIDE_2", null, null, null, null, null, null, null, null,
+                                    null, null, null, null, null, null, null, ownerId(owners, c.get("buyer_name"))))
+                    : List.of(
                     new TransactionService.PartyInput("SIDE_1", null, null, null, null, null, null, null, null, null, null,
                             null, null, null, extent, null, ownerId),
                     new TransactionService.PartyInput("SIDE_2", null, null, "INDIVIDUAL", c.get("buyer_name"),
@@ -495,18 +519,8 @@ public class BulkUploadService {
                     && number(v.get("consideration")).signum() <= 0) {
                 errors.add(error(n, "consideration", "A sale needs a consideration amount above 0"));
             }
-            if ("SALE".equals(deed) && v.get("consideration_mode").isEmpty()) {
-                errors.add(error(n, "consideration_mode", "Required for a sale"));
-            }
-            if (List.of("GIFT", "SETTLEMENT").contains(deed)
-                    && !List.of("FAMILY", "NON_FAMILY").contains(v.get("relationship_category"))) {
-                errors.add(error(n, "relationship_category", "GIFT and SETTLEMENT need FAMILY or NON_FAMILY"));
-            }
             if ("SETTLEMENT".equals(deed) && v.get("relationship_code").isEmpty()) {
                 errors.add(error(n, "relationship_code", "SETTLEMENT needs the blood relation, e.g. SON"));
-            }
-            if ("RELEASE".equals(deed) && !"CO_OWNER".equals(v.get("relationship_category"))) {
-                errors.add(error(n, "relationship_category", "RELEASE needs CO_OWNER"));
             }
             for (String k : List.of("seller_aadhaar", "buyer_aadhaar")) {
                 v.put(k, v.get(k).replaceAll("[\\s-]", ""));
