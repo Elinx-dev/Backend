@@ -112,7 +112,7 @@ public class WorkflowEngine {
 
     private String guardFailureMessage(Map<String, Object> transition, TransactionContext ctx) {
         String guard = (String) transition.get("guard_expr");
-        if ("partiesAndWitnessesComplete".equals(guard)) {
+        if ("partiesAndWitnessesComplete".equals(guard) || "partiesComplete".equals(guard)) {
             List<String> missing = new java.util.ArrayList<>();
             if (ctx.side("SIDE_1").isEmpty()) {
                 missing.add("at least one party on Side 1");
@@ -122,7 +122,8 @@ public class WorkflowEngine {
             }
             boolean witnessRequired = Boolean.TRUE.equals(ctx.deedType().get("witness_required"));
             int minimumWitnesses = ((Number) ctx.deedType().get("min_witness_count")).intValue();
-            if (witnessRequired && ctx.witnesses().size() < minimumWitnesses) {
+            if ("partiesAndWitnessesComplete".equals(guard) && witnessRequired
+                    && ctx.witnesses().size() < minimumWitnesses) {
                 missing.add(minimumWitnesses + " witness(es)");
             }
             List<String> partiesWithoutAadhaar = ctx.parties().stream()

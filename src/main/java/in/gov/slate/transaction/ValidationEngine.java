@@ -78,6 +78,11 @@ public class ValidationEngine {
             return !required || ctx.witnesses().size() >= min;
         });
 
+        predicates.put("partiesComplete", ctx ->
+                predicates.get("minOnePartyPerSide").test(ctx)
+                        && ctx.parties().stream().filter(p -> !Boolean.TRUE.equals(p.get("deceased")))
+                                .allMatch(p -> Boolean.TRUE.equals(p.get("aadhaar_captured"))));
+
         predicates.put("partiesAndWitnessesComplete", ctx ->
                 predicates.get("minOnePartyPerSide").test(ctx)
                         && predicates.get("witnessMinimumMet").test(ctx)

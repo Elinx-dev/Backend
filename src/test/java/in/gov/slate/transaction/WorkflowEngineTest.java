@@ -118,7 +118,7 @@ class WorkflowEngineTest {
 
         assertEquals("CONFLICT", error.getCode());
         assertEquals("Cannot request consent: 2 witness(es); no Aadhaar on record for Buyer, Seller"
-                + " (enter it on the Aadhaar consent tab)", error.getMessage());
+                + " (enter it in the Aadhaar consent section)", error.getMessage());
         verify(validation, never()).evaluate(any(), anyString(), org.mockito.ArgumentMatchers.anyBoolean());
     }
 
