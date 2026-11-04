@@ -60,6 +60,18 @@ has those numbers every write is REJECTED (`DUPLICATE_TOKEN`, `DEED_EXISTS`). Pi
 | `SLATE_DB_URL` | container Postgres | Use your PC's Postgres instead: `jdbc:postgresql://host.docker.internal:5432/slate` |
 | `SLATE_FRONTEND_DIR` | `../Frontend` | Path to the Frontend checkout |
 | `MAVEN_MIRROR` | (none) | Maven Central mirror if downloads fail |
+| `SLATE_CORS_ORIGINS` | localhost + `https://making-boots-moving.ngrok-free.dev` | Public addresses the UI is opened from; others get 403 |
+| `SLATE_PUBLIC_URL` | `http://localhost:8080` | Address used in password-reset emails |
+
+## Share it with ngrok
+
+```
+ngrok http --url=making-boots-moving.ngrok-free.dev 8080
+```
+
+Open https://making-boots-moving.ngrok-free.dev/login. For another ngrok address, set
+`SLATE_CORS_ORIGINS=http://localhost:*,https://<your-address>` (and `SLATE_PUBLIC_URL`) and run
+`docker compose -f docker-compose.app.yml up -d backend`.
 
 ## Everyday commands
 
