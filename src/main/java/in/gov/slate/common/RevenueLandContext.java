@@ -10,6 +10,6 @@ public final class RevenueLandContext {
             return null;
         }
         String value = landType.toString();
-        return "RURAL".equals(value) || "NATHAM".equals(value) ? value : null;
+        return "RURAL".equals(value) || "URBAN".equals(value) || "NATHAM".equals(value) ? value : null;
     }
 }

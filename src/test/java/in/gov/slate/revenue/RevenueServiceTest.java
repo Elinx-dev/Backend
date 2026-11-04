@@ -76,7 +76,7 @@ class RevenueServiceTest {
                 "proposed_owner_set", "[{\"name\":\"Owner\"}]");
         TransactionContext context = new TransactionContext(
                 Map.of("id", 13L, "txn_ref", "TXN-TN-2026-000002"),
-                Map.of("property_ref", "TN-CHN-00000010", "land_type_code", "URBAN"),
+                Map.of("property_ref", "TN-CHN-00000010", "land_type_code", "INDUSTRIAL"),
                 Map.of(),
                 List.of(),
                 List.of(),

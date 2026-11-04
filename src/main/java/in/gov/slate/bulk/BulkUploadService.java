@@ -71,9 +71,9 @@ public class BulkUploadService {
             col("extent_value", "Extent, number > 0", true),
             col("extent_unit", "SQ_FT, SQ_M, CENT, ACRE or HECTARE", true),
             col("property_type_code", "e.g. HOUSE_SITE", true),
-            col("land_type_code", "e.g. NATHAM", true),
-            col("classification_code", "e.g. HOUSE_SITE", true),
-            col("nature_of_title_code", "e.g. PURCHASE", true),
+            col("land_type_code", "RURAL or URBAN", true),
+            col("classification_code", "WET or DRY", true),
+            col("nature_of_title_code", "FREEHOLD or LEASEHOLD", true),
             col("guideline_value", "Guideline value per unit, number", true),
             col("door_no", "Door number", false),
             col("street", "Street", false),
@@ -103,17 +103,17 @@ public class BulkUploadService {
             col("witness2_address", "Witness 2 address", true));
     static final List<List<String>> SAMPLES = List.of(
             List.of("CASE-001", "SALE", "SRO-ADYAR", "CHN", "SHOL", "PERUNGUDI", "501", "1", "2400", "SQ_FT", "HOUSE_SITE",
-                    "NATHAM", "HOUSE_SITE", "PURCHASE", "7500", "501", "Bulk Street", "Road", "Canal", "Plot 502", "Plot 500",
+                    "RURAL", "DRY", "FREEHOLD", "7500", "501", "Bulk Street", "Road", "Canal", "Plot 502", "Plot 500",
                     "60", "40", "Lakshmi Narayanan", "234567890123", "ABCDE1234F", "9812345601", "1 Main St, Perungudi",
                     "Arjun Mehta", "345678901234", "PQRSX6789K", "9712345601", "7 Lake Rd, Velachery", "", "", "18000000",
                     "BANK_TRANSFER", "Ravi Kumar", "Perungudi", "Suresh Babu", "Adyar"),
             List.of("CASE-002", "GIFT", "SRO-ADYAR", "CHN", "SHOL", "PERUNGUDI", "502", "1", "2400", "SQ_FT", "HOUSE_SITE",
-                    "NATHAM", "HOUSE_SITE", "PURCHASE", "7500", "502", "Bulk Street", "Road", "Canal", "Plot 503", "Plot 501",
+                    "RURAL", "DRY", "FREEHOLD", "7500", "502", "Bulk Street", "Road", "Canal", "Plot 503", "Plot 501",
                     "60", "40", "Venkatesh Subramanian", "456789012345", "BCDEF2345G", "9812345602", "2 Main St, Perungudi",
                     "Priya Venkatesh", "567890123456", "CDEFG3456H", "9712345602", "2 Main St, Perungudi", "FAMILY", "DAUGHTER", "0",
                     "", "Mani Raj", "Perungudi", "Kala Devi", "Adyar"),
             List.of("CASE-003", "SALE", "SRO-ADYAR", "CHN", "SHOL", "PERUNGUDI", "503", "1", "2400", "SQ_FT", "HOUSE_SITE",
-                    "NATHAM", "HOUSE_SITE", "PURCHASE", "7500", "503", "Bulk Street", "Road", "Canal", "Plot 504", "Plot 502",
+                    "RURAL", "DRY", "FREEHOLD", "7500", "503", "Bulk Street", "Road", "Canal", "Plot 504", "Plot 502",
                     "60", "40", "Wrong Owner Name", "678901234567", "DEFGH4567J", "9812345603", "3 Main St, Perungudi",
                     "Deepa Raman", "789012345678", "EFGHJ5678K", "9712345603", "9 Beach Rd, Besant Nagar", "", "", "15000000",
                     "BANK_TRANSFER", "Anand", "Perungudi", "Vijay", "Adyar"));
@@ -452,6 +452,10 @@ public class BulkUploadService {
         if (rows.size() > MAX_ROWS) {
             errors.add(error(MAX_ROWS + 2, "case_id", "At most " + MAX_ROWS + " cases per upload"));
         }
+        Map<String, List<String>> identification = new LinkedHashMap<>();
+        identification.put("nature_of_title_code", properties.activeOptionCodes(stateCode, "NATURE_OF_TITLE"));
+        identification.put("land_type_code", properties.activeOptionCodes(stateCode, "LAND_TYPE"));
+        identification.put("classification_code", properties.activeOptionCodes(stateCode, "CLASSIFICATION"));
         Set<String> caseIds = new HashSet<>();
         Set<String> surveys = new LinkedHashSet<>();
         for (Map<String, String> v : rows) {
@@ -477,6 +481,11 @@ public class BulkUploadService {
             if (!v.get("extent_unit").isEmpty() && !UNITS.contains(v.get("extent_unit"))) {
                 errors.add(error(n, "extent_unit", "Must be one of " + UNITS));
             }
+            identification.forEach((k, allowed) -> {
+                if (!v.get(k).isEmpty() && !allowed.contains(v.get(k))) {
+                    errors.add(error(n, k, "Must be one of " + String.join(", ", allowed)));
+                }
+            });
             positive(v, n, "extent_value", errors, false);
             positive(v, n, "guideline_value", errors, true);
             positive(v, n, "length_north_south_ft", errors, false);

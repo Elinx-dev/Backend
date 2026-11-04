@@ -142,6 +142,9 @@ public class PropertyService {
         SurveyRecordInput primary = surveys.get(0);
         validateBoundaryMeasurements(req.boundaryMeasurements());
         validateChainOfTitle(req.chainOfTitle());
+        requireActiveOption(user.stateCode(), "NATURE_OF_TITLE", "Nature of title", req.natureOfTitleCode());
+        requireActiveOption(user.stateCode(), "LAND_TYPE", "Land type", req.landTypeCode());
+        requireActiveOption(user.stateCode(), "CLASSIFICATION", "Classification", req.classificationCode());
         locations.requireValidPath(user.stateCode(), req.districtCode(), req.sroCode(),
                 req.talukCode(), req.villageCode());
         String propertyRef = numbering.next(user.stateCode(), "PROPERTY_REF", req.districtCode());
@@ -437,6 +440,27 @@ public class PropertyService {
                 String.class);
         if (!taken.isEmpty()) {
             throw ApiException.badRequest("ULPIN already recorded for another property: " + String.join(", ", taken));
+        }
+    }
+
+    /** Active value codes of an option set for the state, in display order. */
+    public List<String> activeOptionCodes(String stateCode, String optionSetCode) {
+        return jdbc.queryForList("""
+                SELECT value_code
+                  FROM cfg.option_value
+                 WHERE option_set_code = :set AND active AND state_code IN (:stateCode, '*')
+                 ORDER BY sort_order, value_code
+                """, new MapSqlParameterSource().addValue("set", optionSetCode).addValue("stateCode", stateCode),
+                String.class);
+    }
+
+    private void requireActiveOption(String stateCode, String optionSetCode, String label, String code) {
+        List<String> allowed = activeOptionCodes(stateCode, optionSetCode);
+        if (code == null || code.isBlank()) {
+            throw ApiException.badRequest(label + " is required");
+        }
+        if (!allowed.contains(code)) {
+            throw ApiException.badRequest(label + " must be one of " + String.join(", ", allowed));
         }
     }
 

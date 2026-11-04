@@ -210,8 +210,9 @@ class RevenueOwnershipEngineTest {
 
     @Test
     void omitsUnsupportedLandTypeFromLegacySnapshotColumn() {
-        assertThat(RevenueOwnershipEngine.snapshotLandType("URBAN")).isNull();
+        assertThat(RevenueOwnershipEngine.snapshotLandType("INDUSTRIAL")).isNull();
         assertThat(RevenueOwnershipEngine.snapshotLandType("RURAL")).isEqualTo("RURAL");
         assertThat(RevenueOwnershipEngine.snapshotLandType("NATHAM")).isEqualTo("NATHAM");
+        assertThat(RevenueOwnershipEngine.snapshotLandType("URBAN")).isEqualTo("URBAN");
     }
 }
