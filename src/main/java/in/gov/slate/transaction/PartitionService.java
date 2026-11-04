@@ -33,6 +33,7 @@ public class PartitionService {
     private static final long MAX_UPLOAD_BYTES = 5L * 1024 * 1024;
     private static final Set<String> UPLOAD_TYPES = Set.of("application/pdf", "image/jpeg", "image/png");
     private static final Set<String> STATUSES = Set.of("LIVING", "DECEASED");
+    private static final Set<String> MARITAL_STATUSES = Set.of("MARRIED", "UNMARRIED", "WIDOWED", "DIVORCED");
 
     private final NamedParameterJdbcTemplate jdbc;
     private final TransactionRepository repository;
@@ -65,7 +66,8 @@ public class PartitionService {
     }
 
     public record OwnerInput(Long propertyOwnerId, String status, DeathInput death,
-                             LegalHeirCertificateInput legalHeirCertificate, List<HeirInput> heirs) {
+                             LegalHeirCertificateInput legalHeirCertificate, List<HeirInput> heirs,
+                             String maritalStatus) {
     }
 
     public record PartitionRequest(List<OwnerInput> owners) {
@@ -201,9 +203,10 @@ public class PartitionService {
             throw ApiException.badRequest("Only current owners of " + ctx.propertyRef() + " can be listed");
         }
         Set<Long> documents = documentIds(ctx.id());
+        Map<String, String> relations = bloodRelations(user.stateCode());
         for (Map<String, Object> owner : owners) {
             validateOwner((String) owner.get("owner_name"), byOwner.get(((Number) owner.get("id")).longValue()),
-                    documents);
+                    documents, relations);
         }
         if (owners.size() == 1 && "LIVING".equals(status(byOwner.values().iterator().next().status()))) {
             throw ApiException.badRequest("Partition not applicable: the only current owner is living");
@@ -243,10 +246,10 @@ public class PartitionService {
             DeathInput death = deceased ? o.death() : null;
             LegalHeirCertificateInput lhc = deceased ? o.legalHeirCertificate() : null;
             long ownerMemberId = insertMember(ctx.id(), ++seq[0], ref, null, "OWNER", o.propertyOwnerId(), partyId,
-                    names.get(o.propertyOwnerId()), null, deceased ? "DECEASED" : "LIVING", null, death,
-                    lhc, null);
+                    names.get(o.propertyOwnerId()), null, deceased ? "DECEASED" : "LIVING", marital(o.maritalStatus()),
+                    death, lhc, null);
             if (deceased) {
-                insertHeirs(ctx.id(), ownerMemberId, ref, o.heirs(), seq, heirPartyIds, heirCursor);
+                insertHeirs(ctx.id(), ownerMemberId, ref, o.heirs(), seq, heirPartyIds, heirCursor, relations);
             }
         }
         audit.record("PARTITION_PARTIES_SAVED", "TRANSACTION", String.valueOf(ctx.id()), txnRef, ctx.propertyRef(),
@@ -254,11 +257,12 @@ public class PartitionService {
         return view(repository.load(txnRef, user.stateCode()));
     }
 
-    private void validateOwner(String name, OwnerInput o, Set<Long> documents) {
+    private void validateOwner(String name, OwnerInput o, Set<Long> documents, Map<String, String> relations) {
         String status = status(o.status());
         if (status == null) {
             throw ApiException.badRequest("Give the status (Living / Deceased) of " + name);
         }
+        requireMarried(name, status, o.maritalStatus(), "legal heirs");
         if ("LIVING".equals(status)) {
             return;
         }
@@ -275,18 +279,22 @@ public class PartitionService {
         if (o.heirs() == null || o.heirs().isEmpty()) {
             throw ApiException.badRequest("Add the legal heirs of deceased owner " + name);
         }
-        validateHeirs(o.heirs(), documents);
+        validateHeirs(o.heirs(), documents, relations);
     }
 
-    private void validateHeirs(List<HeirInput> heirs, Set<Long> documents) {
+    private void validateHeirs(List<HeirInput> heirs, Set<Long> documents, Map<String, String> relations) {
         for (HeirInput h : heirs) {
             if (blank(h.name()) || blank(h.relationship())) {
                 throw ApiException.badRequest("Every legal heir needs a name and relationship");
+            }
+            if (!relations.containsKey(h.relationship().trim().toUpperCase())) {
+                throw ApiException.badRequest("Choose a relationship from the list for legal heir " + h.name());
             }
             String status = status(h.status());
             if (status == null) {
                 throw ApiException.badRequest("Give the status (Living / Deceased) of legal heir " + h.name());
             }
+            requireMarried(h.name(), status, h.maritalStatus(), "successors");
             if ("LIVING".equals(status)) {
                 if (h.aadhaarNumber() == null || !h.aadhaarNumber().replaceAll("\\s", "").matches("\\d{12}")) {
                     throw ApiException.badRequest("Enter the 12-digit Aadhaar of living legal heir " + h.name());
@@ -301,9 +309,35 @@ public class PartitionService {
                 if (h.successors() == null || h.successors().isEmpty()) {
                     throw ApiException.badRequest("Add the successors of deceased legal heir " + h.name());
                 }
-                validateHeirs(h.successors(), documents);
+                validateHeirs(h.successors(), documents, relations);
             }
         }
+    }
+
+    /** Marital status is required for everyone; a deceased unmarried person cannot have heirs, so the partition stops. */
+    private static void requireMarried(String name, String status, String maritalStatus, String heirsLabel) {
+        String marital = marital(maritalStatus);
+        if (marital == null) {
+            throw ApiException.badRequest("Select the marital status of " + name);
+        }
+        if ("DECEASED".equals(status) && "UNMARRIED".equals(marital)) {
+            throw ApiException.badRequest(name + " is unmarried, so " + heirsLabel
+                    + " cannot be added and the partition cannot proceed");
+        }
+    }
+
+    /** Active blood relations keyed by upper-case code and name, mapped to the display name that is stored. */
+    private Map<String, String> bloodRelations(String stateCode) {
+        Map<String, String> out = new HashMap<>();
+        jdbc.queryForList("""
+                SELECT code, relationship_name FROM master.blood_relation
+                 WHERE state_code IN (:stateCode, '*') AND status = 'ACTIVE'
+                """, new MapSqlParameterSource("stateCode", stateCode)).forEach(r -> {
+                    String label = (String) r.get("relationship_name");
+                    out.put(((String) r.get("code")).toUpperCase(), label);
+                    out.put(label.toUpperCase(), label);
+                });
+        return out;
     }
 
     private void validateDeath(String name, DeathInput death, Set<Long> documents) {
@@ -339,7 +373,7 @@ public class PartitionService {
     }
 
     private void insertHeirs(long txnId, long parentId, String parentRef, List<HeirInput> heirs, int[] seq,
-                             List<Long> heirPartyIds, int[] heirCursor) {
+                             List<Long> heirPartyIds, int[] heirCursor, Map<String, String> relations) {
         if (heirs == null) {
             return;
         }
@@ -349,10 +383,11 @@ public class PartitionService {
             boolean living = "LIVING".equals(status(h.status()));
             Long partyId = living && heirCursor[0] < heirPartyIds.size() ? heirPartyIds.get(heirCursor[0]++) : null;
             long id = insertMember(txnId, ++seq[0], ref, parentId, "HEIR", null, partyId, h.name().trim(),
-                    h.relationship().trim(), living ? "LIVING" : "DECEASED", emptyToNull(h.maritalStatus()),
+                    relations.get(h.relationship().trim().toUpperCase()), living ? "LIVING" : "DECEASED",
+                    marital(h.maritalStatus()),
                     living ? null : h.death(), null, living ? null : h.successorsAvailable());
             if (!living && Boolean.TRUE.equals(h.successorsAvailable())) {
-                insertHeirs(txnId, id, ref, h.successors(), seq, heirPartyIds, heirCursor);
+                insertHeirs(txnId, id, ref, h.successors(), seq, heirPartyIds, heirCursor, relations);
             }
         }
     }
@@ -686,6 +721,14 @@ public class PartitionService {
         }
         String s = value.trim().toUpperCase();
         return STATUSES.contains(s) ? s : null;
+    }
+
+    private static String marital(String value) {
+        if (value == null) {
+            return null;
+        }
+        String s = value.trim().toUpperCase();
+        return MARITAL_STATUSES.contains(s) ? s : null;
     }
 
     private static boolean blank(String value) {
