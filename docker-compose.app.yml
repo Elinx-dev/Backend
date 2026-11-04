@@ -1,0 +1,65 @@
+# SLATE app stack (PostgreSQL, Backend API, Frontend UI) on top of the Fabric network in fabric/.
+# Start Fabric first:   cd fabric && docker compose up -d
+# Then from Backend/:   docker compose -f docker-compose.app.yml up -d --build
+name: slate-app
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: slate
+      POSTGRES_USER: slate
+      POSTGRES_PASSWORD: slate
+    ports:
+      - "${SLATE_DB_HOST_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U slate -d slate"]
+      interval: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+      args:
+        MAVEN_MIRROR: ${MAVEN_MIRROR:-}
+    image: slate-backend:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SLATE_DB_URL: ${SLATE_DB_URL:-jdbc:postgresql://postgres:5432/slate}
+      SLATE_DB_USER: ${SLATE_DB_USER:-slate}
+      SLATE_DB_PASSWORD: ${SLATE_DB_PASSWORD:-slate}
+      FABRIC_REGISTRATION_PEER: peer0.registration.slate.local:7051
+      FABRIC_REVENUE_PEER: peer0.revenue.slate.local:7051
+      FABRIC_SURVEY_PEER: peer0.survey.slate.local:7051
+      SLATE_RESET_BASE_URL: ${SLATE_PUBLIC_URL:-http://localhost:8080}/reset-password
+      SLATE_CORS_ORIGINS: ${SLATE_CORS_ORIGINS:-http://localhost:*,http://127.0.0.1:*,https://making-boots-moving.ngrok-free.dev}
+    volumes:
+      - ./fabric/organizations:/fabric/organizations:ro
+    ports:
+      - "${SLATE_API_HOST_PORT:-8081}:8081"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [default, fabric]
+    restart: unless-stopped
+
+  frontend:
+    build: ${SLATE_FRONTEND_DIR:-../Frontend}
+    image: slate-frontend:local
+    depends_on: [backend]
+    environment:
+      SLATE_API_UPSTREAM: http://backend:8081
+    ports:
+      - "${SLATE_UI_PORT:-8080}:80"
+    restart: unless-stopped
+
+networks:
+  fabric:
+    external: true
+    name: slate_fabric
+
+volumes:
+  pgdata:
