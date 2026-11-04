@@ -38,6 +38,9 @@ spring:
             enable: ${SLATE_SMTP_STARTTLS:false}
 
 slate:
+  public:
+    # Requests per minute one client may make to the no-login /api/public endpoints.
+    rate-limit-per-minute: ${SLATE_PUBLIC_RATE_LIMIT:120}
   security:
     # true = local demo: demo secrets and mock endpoints are allowed (with a warning).
     # Set SLATE_LOCAL_DEMO=false outside local use; startup then fails on any demo secret.
