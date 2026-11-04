@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import in.gov.slate.common.ApiException;
 import in.gov.slate.common.AuditService;
 import in.gov.slate.config.ConfigService;
 import in.gov.slate.common.CurrentUser;
@@ -54,6 +55,15 @@ public class RuleCheckService {
         this.connectorMode = connectorMode;
     }
 
+    private static void requireWitnesses(TransactionContext ctx) {
+        boolean required = Boolean.TRUE.equals(ctx.deedType().get("witness_required"));
+        Object min = ctx.deedType().get("min_witness_count");
+        int minimum = min instanceof Number number ? number.intValue() : 0;
+        if (required && ctx.witnesses().size() < minimum) {
+            throw ApiException.conflict("Save " + minimum + " witness(es) before running rule checks");
+        }
+    }
+
     @Transactional
     public List<Map<String, Object>> run(String txnRef, List<String> requestedEngines, String mode,
                                          LocalDate assessmentDate) {
@@ -61,6 +71,7 @@ public class RuleCheckService {
         user.requirePermission("RULE_CHECK_RUN");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
         workflow.requireStatus(ctx, "RULE_CHECK_PENDING", "Rule checks", user);
+        requireWitnesses(ctx);
         String effectiveMode = mode == null ? "PRE_REGISTRATION_CLEARANCE" : mode;
         LocalDate assessedOn = assessmentDate == null ? LocalDate.now() : assessmentDate;
 
