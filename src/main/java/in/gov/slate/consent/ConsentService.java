@@ -76,11 +76,14 @@ public class ConsentService {
         String mode = config.flagEnabled(user.stateCode(), AADHAAR_OTP_LIVE) ? "LIVE" : "MOCK";
         AadhaarConnector aadhaar = connector(mode);
 
+        List<Long> alreadyVerified = jdbc.queryForList(
+                "SELECT party_id FROM core.consent_record WHERE transaction_id = :txnId AND status = 'VERIFIED'",
+                new MapSqlParameterSource("txnId", ctx.id()), Long.class);
         List<Map<String, Object>> out = new ArrayList<>();
         for (Map<String, Object> party : ctx.parties()) {
             long partyId = ((Number) party.get("id")).longValue();
             if (partyIds != null && !partyIds.isEmpty() && !partyIds.contains(partyId)
-                    || Boolean.TRUE.equals(party.get("deceased"))) {
+                    || Boolean.TRUE.equals(party.get("deceased")) || alreadyVerified.contains(partyId)) {
                 continue;
             }
             if (!Boolean.TRUE.equals(party.get("aadhaar_captured"))) {

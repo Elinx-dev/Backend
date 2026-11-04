@@ -347,14 +347,22 @@ public class TransactionService {
         user.requirePermission("TXN_EDIT");
         TransactionContext ctx = repository.load(txnRef, user.stateCode());
         requireEditable(ctx);
-        if (!ctx.consents().isEmpty()) {
+        Integer otpConsents = jdbc.queryForObject("""
+                SELECT count(*) FROM core.consent_record
+                 WHERE transaction_id = :id AND coalesce(device_id, '') <> 'EKYC'
+                """, new MapSqlParameterSource("id", ctx.id()), Integer.class);
+        if (otpConsents != null && otpConsents > 0) {
             throw ApiException.conflict("Parties cannot be replaced after consent has been requested");
         }
-        List<PartyInput> resolved = restoreMaskedValues(ctx, resolveParties(ctx, parties));
+        Map<String, Map<String, Object>> ekycBySideSeq = new LinkedHashMap<>();
+        List<PartyInput> resolved = applyEkyc(user.stateCode(),
+                restoreMaskedValues(ctx, resolveParties(ctx, parties)), ekycBySideSeq);
         TransactionTypeRules.validateParties(ctx.deedType(), resolved,
                 code -> config.isActiveBloodRelation(user.stateCode(), code));
         validateEnteredParties(user.stateCode(), ctx.deedType(), resolved);
 
+        jdbc.update("DELETE FROM core.consent_record WHERE transaction_id = :id AND device_id = 'EKYC'",
+                new MapSqlParameterSource("id", ctx.id()));
         jdbc.update("DELETE FROM core.transaction_party WHERE transaction_id = :id",
                 new MapSqlParameterSource("id", ctx.id()));
 
@@ -415,11 +423,66 @@ public class TransactionService {
                     .addValue("aadhaarEnc", pii.protect(aadhaar)));
         }
 
+        ekycBySideSeq.forEach((key, profile) -> {
+            String[] sideSeq = key.split("#");
+            jdbc.update("""
+                    INSERT INTO core.consent_record (transaction_id, party_id, aadhaar_hash, otp_request_reference,
+                        status, requested_at, verified_at, attempt_count, device_id, officer_user_id,
+                        consent_text_version, otp_mode)
+                    SELECT :txnId, p.id, p.aadhaar_hash, :reference, 'VERIFIED', now(), now(), 1, 'EKYC', :officer,
+                           'EKYC-v1', :mode
+                      FROM core.transaction_party p
+                     WHERE p.transaction_id = :txnId AND p.side = :side AND p.seq = :seq
+                    """, new MapSqlParameterSource()
+                    .addValue("txnId", ctx.id())
+                    .addValue("side", sideSeq[0])
+                    .addValue("seq", Integer.parseInt(sideSeq[1]))
+                    .addValue("reference", String.valueOf(profile.get("ekycRef")))
+                    .addValue("officer", user.id())
+                    .addValue("mode", String.valueOf(profile.getOrDefault("otpMode", "MOCK"))));
+        });
+
         TransactionContext updated = repository.load(txnRef, user.stateCode());
         validation.evaluate(updated, "PARTY", true);
         audit.record("PARTIES_SAVED", "TRANSACTION", String.valueOf(ctx.id()), txnRef, ctx.propertyRef(),
                 Map.of("partyCount", resolved.size()), null);
         return detail(txnRef);
+    }
+
+    private in.gov.slate.consent.AadhaarEkycService ekyc;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setAadhaarEkycService(in.gov.slate.consent.AadhaarEkycService ekyc) {
+        this.ekyc = ekyc;
+    }
+
+    /**
+     * Second-party individuals whose Aadhaar was verified by OTP e-KYC take name, address and mobile
+     * from the Aadhaar profile (PAN stays as entered); their consent is recorded as verified.
+     */
+    private List<PartyInput> applyEkyc(String stateCode, List<PartyInput> parties,
+                                       Map<String, Map<String, Object>> ekycBySideSeq) {
+        if (ekyc == null) {
+            return parties;
+        }
+        Map<String, Integer> seqBySide = new LinkedHashMap<>();
+        List<PartyInput> out = new java.util.ArrayList<>();
+        for (PartyInput p : parties) {
+            int seq = seqBySide.merge(p.side(), 1, Integer::sum);
+            Map<String, Object> profile = "SIDE_2".equals(p.side()) && p.propertyOwnerId() == null
+                    ? ekyc.verifiedProfile(stateCode, p.aadhaarNumber()) : null;
+            if (profile == null) {
+                out.add(p);
+                continue;
+            }
+            ekycBySideSeq.put(p.side() + "#" + seq, profile);
+            out.add(new PartyInput(p.side(), p.role(), p.partyType(), p.ownerTypeCode(),
+                    String.valueOf(profile.get("name")), p.aadhaarNumber(), p.kartaName(), p.kartaAadhaarNumber(),
+                    p.pan(), String.valueOf(profile.get("mobile")), String.valueOf(profile.get("address")),
+                    p.registrationNo(), p.representative(), p.relationshipCode(), p.extentTransferred(),
+                    p.authorityPoaReference(), p.propertyOwnerId()));
+        }
+        return out;
     }
 
     /**
@@ -729,8 +792,15 @@ public class TransactionService {
         jdbc.update("UPDATE core.witness SET is_active = 'N' WHERE transaction_id = :id AND is_active = 'Y'",
                 new MapSqlParameterSource("id", ctx.id()));
         int seq = 0;
-        for (WitnessInput w : witnesses) {
+        for (WitnessInput input : witnesses) {
             seq++;
+            WitnessInput w = input;
+            Map<String, Object> profile = ekyc != null && "AADHAAR".equals(input.idProofType())
+                    ? ekyc.verifiedProfile(user.stateCode(), input.idProofRef()) : null;
+            if (profile != null) {
+                w = new WitnessInput(String.valueOf(profile.get("name")), String.valueOf(profile.get("address")),
+                        input.idProofType(), "XXXX-XXXX-" + profile.get("aadhaarLast4"));
+            }
             jdbc.update("""
                     INSERT INTO core.witness (transaction_id, seq, name, address, id_proof_type, id_proof_ref, is_active)
                     VALUES (:txnId, :seq, :name, :address, :type, :ref, 'Y')
