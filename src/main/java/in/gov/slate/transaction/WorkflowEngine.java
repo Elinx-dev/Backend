@@ -131,7 +131,7 @@ public class WorkflowEngine {
                     .toList();
             if (!partiesWithoutAadhaar.isEmpty()) {
                 missing.add("no Aadhaar on record for " + String.join(", ", partiesWithoutAadhaar)
-                        + " (enter it on the Aadhaar consent tab)");
+                        + " (enter it in the Aadhaar consent section)");
             }
             return "Cannot request consent: " + String.join("; ", missing);
         }
